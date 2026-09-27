@@ -215,7 +215,7 @@ function App() {
             </>
           )}
         </section>
-        <footer><span>LH-Hub v0.3.0</span><span>{clock}</span></footer>
+        <footer><span>LH-Hub v0.3.1</span><span>{clock}</span></footer>
       </main>
     </div>
   );

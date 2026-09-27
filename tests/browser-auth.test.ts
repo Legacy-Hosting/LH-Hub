@@ -23,6 +23,9 @@ function protocol() {
       refreshes += 1;
       return { accessToken: "refreshed-access", refreshToken: "refresh-2", expiresIn: 60 };
     },
+    async endSessionUrl() {
+      return new URL("https://auth.legacyhosting.xyz/session/end?client_id=lh-hub");
+    },
   };
   return { implementation, state: () => state, refreshes: () => refreshes };
 }
@@ -61,12 +64,35 @@ test("browser OIDC uses correlation, local redirects, staff roles, and refresh r
   ]);
   assert.equal(oidc.refreshes(), 1);
 
-  await auth.logout(completed.sessionToken);
+  assert.equal(
+    await auth.logout(completed.sessionToken),
+    "https://auth.legacyhosting.xyz/session/end?client_id=lh-hub",
+  );
   assert.equal(await auth.identity(completed.sessionToken), undefined);
   await assert.rejects(
     auth.complete(callback, started.correlation),
     (error: unknown) => error instanceof BrowserAuthError && error.statusCode === 401,
   );
+});
+
+test("back-channel logout removes every session for the subject", async () => {
+  const oidc = protocol();
+  const auth = createBrowserAuth({
+    protocol: oidc.implementation,
+    issuer: "https://auth.legacyhosting.xyz",
+    hubOrigin: "https://hub.legacyhosting.xyz",
+    tokenVerifier: async () => ({ sub: "staff-1", roles: ["support"] }),
+  });
+  const first = await auth.begin("/");
+  const firstCallback = new URL(`https://hub.legacyhosting.xyz/auth/callback?code=x&state=${oidc.state()}`);
+  const firstSession = await auth.complete(firstCallback, first.correlation);
+  const second = await auth.begin("/");
+  const secondCallback = new URL(`https://hub.legacyhosting.xyz/auth/callback?code=y&state=${oidc.state()}`);
+  const secondSession = await auth.complete(secondCallback, second.correlation);
+
+  assert.equal(await auth.revokeSubject("staff-1"), 2);
+  assert.equal(await auth.identity(firstSession.sessionToken), undefined);
+  assert.equal(await auth.identity(secondSession.sessionToken), undefined);
 });
 
 test("browser OIDC rejects a callback not bound to the initiating browser", async () => {

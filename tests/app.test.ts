@@ -5,6 +5,7 @@ import { buildApp } from "../src/server/app.js";
 
 let app: FastifyInstance;
 let loggedOutToken: string | undefined;
+let revokedSubject: string | undefined;
 
 before(async () => {
   app = await buildApp({
@@ -23,7 +24,16 @@ before(async () => {
         : undefined,
       logout: async (token) => {
         loggedOutToken = token;
+        return "https://auth.legacyhosting.xyz/session/end?client_id=lh-hub";
       },
+      revokeSubject: async (subject) => {
+        revokedSubject = subject;
+        return 1;
+      },
+    },
+    logoutTokenVerifier: async (token) => {
+      assert.equal(token, "x".repeat(120));
+      return { subject: "user-1", eventId: "logout-event-123456789" };
     },
     hubOrigin: "https://hub.legacyhosting.xyz",
     secureCookies: true,
@@ -61,7 +71,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-    version: "0.3.0",
+    version: "0.3.1",
   });
 });
 
@@ -123,6 +133,26 @@ test("browser login binds the callback and creates an HttpOnly session", async (
   });
   assert.equal(logout.statusCode, 303);
   assert.equal(loggedOutToken, "s".repeat(43));
+  assert.equal(
+    logout.headers.location,
+    "https://auth.legacyhosting.xyz/session/end?client_id=lh-hub",
+  );
+
+  const crossOriginLogout = await app.inject({
+    method: "POST",
+    url: "/auth/logout",
+    headers: { origin: "https://attacker.invalid" },
+  });
+  assert.equal(crossOriginLogout.statusCode, 403);
+
+  const backchannel = await app.inject({
+    method: "POST",
+    url: "/auth/backchannel-logout",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    payload: new URLSearchParams({ logout_token: "x".repeat(120) }).toString(),
+  });
+  assert.equal(backchannel.statusCode, 200);
+  assert.equal(revokedSubject, "user-1");
 });
 
 test("service checks run server-side for authorized staff", async () => {

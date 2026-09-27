@@ -103,5 +103,12 @@ export function createHubOidcProtocol(options: {
       );
       return tokenResult(tokens);
     },
+
+    async endSessionUrl() {
+      return oidc.buildEndSessionUrl(await configuration(), {
+        client_id: options.clientId,
+        post_logout_redirect_uri: new URL("/", options.redirectUri).toString(),
+      });
+    },
   };
 }

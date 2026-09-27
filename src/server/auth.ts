@@ -20,6 +20,10 @@ const claimsSchema = z.object({
 
 export type HubIdentity = z.infer<typeof claimsSchema>;
 export type TokenVerifier = (token: string) => Promise<unknown>;
+export type LogoutTokenIdentity = { subject: string; eventId: string };
+export type LogoutTokenVerifier = (token: string) => Promise<LogoutTokenIdentity>;
+
+const logoutEvent = "http://schemas.openid.net/event/backchannel-logout";
 
 export function readBearerToken(header: string | undefined) {
   if (!header?.startsWith("Bearer ")) return null;
@@ -46,5 +50,39 @@ export function createOidcTokenVerifier(options: {
       algorithms: ["ES256", "RS256"],
     });
     return result.payload satisfies JWTPayload;
+  };
+}
+
+export function createOidcLogoutTokenVerifier(options: {
+  issuer: string;
+  audience: string;
+  jwksUrl: string;
+}): LogoutTokenVerifier {
+  const keySet = createRemoteJWKSet(new URL(options.jwksUrl));
+  return async (token) => {
+    const { payload } = await jwtVerify(token, keySet, {
+      issuer: options.issuer,
+      audience: options.audience,
+      algorithms: ["ES256"],
+      maxTokenAge: "2 minutes",
+      clockTolerance: 5,
+    });
+    const events = payload.events;
+    if (
+      !events ||
+      typeof events !== "object" ||
+      Array.isArray(events) ||
+      !(logoutEvent in events) ||
+      "nonce" in payload ||
+      typeof payload.sub !== "string" ||
+      payload.sub.length < 1 ||
+      payload.sub.length > 255 ||
+      typeof payload.jti !== "string" ||
+      payload.jti.length < 16 ||
+      payload.jti.length > 255
+    ) {
+      throw new Error("invalid_logout_token");
+    }
+    return { subject: payload.sub, eventId: payload.jti };
   };
 }

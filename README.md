@@ -6,6 +6,8 @@ The backend validates LH-SSO access tokens against the configured issuer, audien
 
 The Hub uses LH-SSO Authorization Code Flow with PKCE through a backend-for-frontend. Authorization codes, access tokens, and rotating refresh tokens stay on the Hub server; the browser receives only a random Secure, HttpOnly, SameSite session cookie. Browser sessions are held in memory and are intentionally invalidated by a Hub restart, after which the existing LH-SSO session provides a quick reauthentication.
 
+Hub sign-out deletes the local browser session and redirects to SSO's discovered end-session endpoint. `/auth/backchannel-logout` accepts only signed, short-lived ES256 logout tokens for the Hub client audience and immediately removes every in-memory session for the token subject.
+
 Only a verified access token containing an allowlisted staff role creates a browser session. The token is refreshed server-side before expiry so role changes and SSO revocation are enforced without exposing tokens to React. The Hub keeps bearer-token support for authenticated service access.
 
 The infrastructure view reads Droplet metadata and DigitalOcean Insights only on the Hub server. Use a custom DigitalOcean token with `monitoring:read` and its required read scopes, including `droplet:read`, `regions:read`, `sizes:read`, `actions:read`, `image:read`, and `snapshot:read`. The token is never returned to the browser. Metrics are cached for two minutes by default, concurrent refreshes are deduplicated, and provider failures fall back to the last successful snapshot.

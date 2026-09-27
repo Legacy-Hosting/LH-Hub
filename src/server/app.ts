@@ -1,4 +1,5 @@
 import helmet from "@fastify/helmet";
+import formbody from "@fastify/formbody";
 import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
 import { z } from "zod";
@@ -6,6 +7,7 @@ import {
   authorizeClaims,
   readBearerToken,
   type HubIdentity,
+  type LogoutTokenVerifier,
   type TokenVerifier,
 } from "./auth.js";
 import type { BrowserAuthService } from "./browser-auth.js";
@@ -23,6 +25,7 @@ export async function buildApp(options: {
   secureCookies?: boolean;
   fetchImplementation?: FetchImplementation;
   infrastructureReader?: InfrastructureReader;
+  logoutTokenVerifier?: LogoutTokenVerifier;
 } = {}) {
   const app = Fastify({
     logger: env.NODE_ENV === "production",
@@ -32,6 +35,7 @@ export async function buildApp(options: {
   await app.register(helmet, {
     contentSecurityPolicy: false,
   });
+  await app.register(formbody);
   await app.register(rateLimit, {
     max: 120,
     timeWindow: "1 minute",
@@ -147,18 +151,44 @@ export async function buildApp(options: {
   app.post("/auth/logout", async (request, reply) => {
     reply.header("Cache-Control", "no-store");
     const origin = request.headers.origin;
-    if (origin && origin !== new URL(hubOrigin).origin) {
+    if (origin !== new URL(hubOrigin).origin) {
       return reply.status(403).send({ error: "invalid_origin" });
     }
-    await options.browserAuth?.logout(readCookie(request.headers.cookie, cookieNames.session));
+    let logoutUrl = "/";
+    try {
+      logoutUrl = await options.browserAuth?.logout(
+        readCookie(request.headers.cookie, cookieNames.session),
+      ) ?? "/";
+    } catch {
+      request.log.warn("Local Hub logout completed but SSO logout could not start");
+    }
     reply.header("Set-Cookie", sessionCookie(cookieNames.session, "", 0));
-    return reply.redirect("/", 303);
+    return reply.redirect(logoutUrl, 303);
+  });
+
+  app.post("/auth/backchannel-logout", {
+    config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
+  }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const body = z.object({ logout_token: z.string().min(100).max(16_384) })
+      .safeParse(request.body);
+    if (!body.success || !options.logoutTokenVerifier || !options.browserAuth) {
+      return reply.status(400).send({ error: "invalid_logout_token" });
+    }
+    try {
+      const identity = await options.logoutTokenVerifier(body.data.logout_token);
+      await options.browserAuth.revokeSubject(identity.subject);
+      return reply.status(200).send();
+    } catch {
+      request.log.warn("Hub back-channel logout token was rejected");
+      return reply.status(400).send({ error: "invalid_logout_token" });
+    }
   });
 
   app.get("/health", async () => ({
     status: "ok",
     service: "LH-Hub",
-    version: "0.3.0",
+    version: "0.3.1",
   }));
 
   app.get("/api/v1/session", async (request, reply) => {

@@ -1,5 +1,8 @@
 import { buildApp } from "./app.js";
-import { createOidcTokenVerifier } from "./auth.js";
+import {
+  createOidcLogoutTokenVerifier,
+  createOidcTokenVerifier,
+} from "./auth.js";
 import { createBrowserAuth } from "./browser-auth.js";
 import { env } from "./config.js";
 import { createDigitalOceanInfrastructureReader } from "./digitalocean.js";
@@ -31,6 +34,13 @@ const browserAuth = tokenVerifier && env.SSO_ISSUER && env.SSO_CLIENT_ID &&
       }),
     })
   : undefined;
+const logoutTokenVerifier = env.SSO_ISSUER && env.SSO_CLIENT_ID && env.SSO_JWKS_URL
+  ? createOidcLogoutTokenVerifier({
+      issuer: env.SSO_ISSUER,
+      audience: env.SSO_CLIENT_ID,
+      jwksUrl: env.SSO_JWKS_URL,
+    })
+  : undefined;
 const infrastructureReader = createDigitalOceanInfrastructureReader({
   ...(env.DIGITALOCEAN_TOKEN ? { token: env.DIGITALOCEAN_TOKEN } : {}),
   timeoutMs: env.DIGITALOCEAN_REQUEST_TIMEOUT_MS,
@@ -40,6 +50,7 @@ const infrastructureReader = createDigitalOceanInfrastructureReader({
 const app = await buildApp({
   ...(tokenVerifier ? { tokenVerifier } : {}),
   ...(browserAuth ? { browserAuth } : {}),
+  ...(logoutTokenVerifier ? { logoutTokenVerifier } : {}),
   infrastructureReader,
 });
 

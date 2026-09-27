@@ -41,6 +41,7 @@ export type HubOidcProtocol = {
     codeVerifier: string;
   }): Promise<OidcTokenResult>;
   refresh(refreshToken: string): Promise<OidcTokenResult>;
+  endSessionUrl(): Promise<URL>;
 };
 
 export type BrowserAuthService = {
@@ -50,7 +51,8 @@ export type BrowserAuthService = {
     correlation: string | undefined,
   ): Promise<{ sessionToken: string; returnPath: string }>;
   identity(sessionToken: string | undefined): Promise<HubIdentity | undefined>;
-  logout(sessionToken: string | undefined): Promise<void>;
+  logout(sessionToken: string | undefined): Promise<string>;
+  revokeSubject(subject: string): Promise<number>;
 };
 
 export class BrowserAuthError extends Error {
@@ -258,6 +260,22 @@ export function createBrowserAuth(options: {
       if (sessionToken && tokenPattern.test(sessionToken)) {
         sessions.delete(tokenHash(sessionToken));
       }
+      const logoutUrl = await options.protocol.endSessionUrl();
+      if (logoutUrl.origin !== issuerOrigin) {
+        throw new BrowserAuthError("invalid_logout_url", 503);
+      }
+      return logoutUrl.toString();
+    },
+
+    async revokeSubject(subject) {
+      let revoked = 0;
+      for (const [key, session] of sessions) {
+        if (session.identity.sub !== subject) continue;
+        sessions.delete(key);
+        refreshes.delete(key);
+        revoked += 1;
+      }
+      return revoked;
     },
   };
 }
