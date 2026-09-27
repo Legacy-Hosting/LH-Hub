@@ -11,6 +11,7 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5174,
     proxy: {
+      "/auth": "http://127.0.0.1:8081",
       "/api": "http://127.0.0.1:8081",
       "/health": "http://127.0.0.1:8081",
     },

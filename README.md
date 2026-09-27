@@ -4,7 +4,9 @@ Internal operations workspace for Legacy Hosting staff. LH-Hub is not a customer
 
 The backend validates LH-SSO access tokens against the configured issuer, audience, and JWKS endpoint. Only normalized staff roles (`founder`, `management`, `platform_admin`, `developer`, `infrastructure`, `support`, and `sales`) pass authorization. Customer and Discord role names are not accepted directly.
 
-The first foundation provides public process health, protected staff/session endpoints, and bounded server-side health checks. Full sign-in remains intentionally disabled in the UI until LH-SSO implements and verifies Authorization Code with PKCE.
+The Hub uses LH-SSO Authorization Code Flow with PKCE through a backend-for-frontend. Authorization codes, access tokens, and rotating refresh tokens stay on the Hub server; the browser receives only a random Secure, HttpOnly, SameSite session cookie. Browser sessions are held in memory and are intentionally invalidated by a Hub restart, after which the existing LH-SSO session provides a quick reauthentication.
+
+Only a verified access token containing an allowlisted staff role creates a browser session. The token is refreshed server-side before expiry so role changes and SSO revocation are enforced without exposing tokens to React. The Hub keeps bearer-token support for authenticated service access.
 
 ## Development
 

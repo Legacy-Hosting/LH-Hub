@@ -4,6 +4,8 @@ import {
   Activity,
   Gauge,
   LockKeyhole,
+  LogIn,
+  LogOut,
   Server,
   ShieldCheck,
   Users,
@@ -27,6 +29,10 @@ function greeting(date) {
 function App() {
   const [now, setNow] = useState(new Date());
   const [health, setHealth] = useState("checking");
+  const [auth, setAuth] = useState({ state: "checking", user: null });
+  const [services, setServices] = useState([]);
+  const authError = new URLSearchParams(window.location.search).has("auth_error");
+
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     fetch("/health", { headers: { accept: "application/json" } })
@@ -35,17 +41,49 @@ function App() {
         setHealth("online");
       })
       .catch(() => setHealth("unavailable"));
-    return () => clearInterval(timer);
+
+    let active = true;
+    async function loadSession() {
+      try {
+        const sessionResponse = await fetch("/api/v1/session", {
+          credentials: "same-origin",
+          headers: { accept: "application/json" },
+        });
+        if (sessionResponse.status === 401) {
+          if (active) setAuth({ state: "guest", user: null });
+          return;
+        }
+        if (!sessionResponse.ok) throw new Error("session unavailable");
+        const session = await sessionResponse.json();
+        if (!active) return;
+        setAuth({ state: "authenticated", user: session.user });
+        const overviewResponse = await fetch("/api/v1/overview", {
+          credentials: "same-origin",
+          headers: { accept: "application/json" },
+        });
+        if (!overviewResponse.ok) throw new Error("overview unavailable");
+        const overview = await overviewResponse.json();
+        if (active) setServices(Array.isArray(overview.services) ? overview.services : []);
+      } catch {
+        if (active) setAuth({ state: "unavailable", user: null });
+      }
+    }
+    void loadSession();
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
   }, []);
+
   const clock = useMemo(
-    () =>
-      new Intl.DateTimeFormat("en-GB", {
-        dateStyle: "medium",
-        timeStyle: "medium",
-        timeZone: "Europe/Oslo",
-      }).format(now),
+    () => new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "medium",
+    }).format(now),
     [now],
   );
+  const displayName = auth.user?.name?.split(" ")[0] || "Legacy Hosting";
+  const authenticated = auth.state === "authenticated";
 
   return (
     <div className="shell">
@@ -61,22 +99,39 @@ function App() {
       </aside>
       <main>
         <header>
-          <div><span>Internal operations</span><h1>{greeting(now)}, Legacy Hosting</h1></div>
+          <div><span>Internal operations</span><h1>{greeting(now)}, {displayName}</h1></div>
           <div className={`health ${health}`}><i />Hub {health}</div>
         </header>
         <section className="content">
-          <div className="notice">
-            <div className="notice-icon"><LockKeyhole size={25} /></div>
-            <div><span>Access boundary ready</span><h2>Staff authentication is waiting for LH-SSO OIDC</h2><p>The Hub API already rejects anonymous users and non-staff roles. Operational data remains unavailable until signed SSO tokens are enabled.</p></div>
-          </div>
-          <div className="section-title"><div><span>Planned workspace</span><h2>One operational view</h2></div><p>No provider credential is ever sent to the browser.</p></div>
+          {authenticated ? (
+            <div className="notice authenticated">
+              <div className="notice-icon"><ShieldCheck size={25} /></div>
+              <div className="notice-copy"><span>Authenticated by LH-SSO</span><h2>Staff access active</h2><p>{auth.user.email || auth.user.name || auth.user.sub}</p><div className="roles">{auth.user.roles.map((role) => <b key={role}>{role.replaceAll("_", " ")}</b>)}</div></div>
+              <form action="/auth/logout" method="post"><button className="secondary" type="submit"><LogOut size={16} />Sign out</button></form>
+            </div>
+          ) : (
+            <div className="notice">
+              <div className="notice-icon"><LockKeyhole size={25} /></div>
+              <div className="notice-copy"><span>Restricted workspace</span><h2>{auth.state === "checking" ? "Checking your staff session" : "Sign in with Legacy Hosting SSO"}</h2><p>{authError ? "The previous sign-in could not be completed. Try again or contact an administrator." : "Only authorized Legacy Hosting staff roles can access operational data."}</p></div>
+              {auth.state !== "checking" && <a className="primary" href="/auth/login?return_to=%2F"><LogIn size={16} />Sign in</a>}
+            </div>
+          )}
+          <div className="section-title"><div><span>{authenticated ? "Live checks" : "Protected areas"}</span><h2>{authenticated ? "Service overview" : "One operational view"}</h2></div><p>No provider credential is ever sent to the browser.</p></div>
           <div className="grid">
-            {staffAreas.map(({ icon: Icon, title, text }) => (
-              <article key={title}><div><Icon size={20} /></div><h3>{title}</h3><p>{text}</p><span>Awaiting authenticated data</span></article>
-            ))}
+            {(authenticated && services.length > 0 ? services : staffAreas).map((item) => {
+              const Icon = item.icon || Activity;
+              return (
+                <article key={item.key || item.title}>
+                  <div><Icon size={20} /></div>
+                  <h3>{item.name || item.title}</h3>
+                  <p>{item.text || `Latest server-side check: ${item.checkedAt}`}</p>
+                  <span className={item.state || "locked"}>{item.state ? `${item.state} · ${item.latencyMs ?? "–"} ms` : "Sign-in required"}</span>
+                </article>
+              );
+            })}
           </div>
         </section>
-        <footer><span>LH-Hub v0.1.0</span><span>{clock}</span></footer>
+        <footer><span>LH-Hub v0.2.0</span><span>{clock}</span></footer>
       </main>
     </div>
   );

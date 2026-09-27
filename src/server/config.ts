@@ -22,6 +22,13 @@ const schema = z
     SSO_ISSUER: z.string().url().optional(),
     SSO_AUDIENCE: z.string().min(1).default("lh-hub"),
     SSO_JWKS_URL: z.string().url().optional(),
+    SSO_CLIENT_ID: z.string().min(1).optional(),
+    SSO_CLIENT_SECRET: z.string().min(32).optional(),
+    SSO_REDIRECT_URI: z.string().url().optional(),
+    SSO_RESOURCE: z.string().url().optional(),
+    SSO_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(15_000).default(5_000),
+    HUB_ORIGIN: z.string().url().default("http://localhost:5174"),
+    HUB_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(28_800).default(28_800),
     SERVICE_HEALTH_TARGETS: z.string().default(defaultTargets),
     SERVICE_HEALTH_TIMEOUT_MS: z.coerce
       .number()
@@ -32,7 +39,14 @@ const schema = z
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV !== "production") return;
-    for (const field of ["SSO_ISSUER", "SSO_JWKS_URL"] as const) {
+    for (const field of [
+      "SSO_ISSUER",
+      "SSO_JWKS_URL",
+      "SSO_CLIENT_ID",
+      "SSO_CLIENT_SECRET",
+      "SSO_REDIRECT_URI",
+      "SSO_RESOURCE",
+    ] as const) {
       if (!value[field]) {
         context.addIssue({
           code: "custom",
@@ -46,6 +60,51 @@ const schema = z
         code: "custom",
         path: ["HOST"],
         message: "LH-Hub must listen on the local reverse-proxy interface",
+      });
+    }
+    if (
+      !value.SSO_ISSUER ||
+      !value.SSO_JWKS_URL ||
+      !value.SSO_REDIRECT_URI ||
+      !value.SSO_RESOURCE
+    ) return;
+    const issuer = new URL(value.SSO_ISSUER);
+    const jwks = new URL(value.SSO_JWKS_URL);
+    const hubOrigin = new URL(value.HUB_ORIGIN);
+    const redirect = new URL(value.SSO_REDIRECT_URI);
+    const resource = new URL(value.SSO_RESOURCE);
+    if (issuer.protocol !== "https:" || jwks.protocol !== "https:") {
+      context.addIssue({
+        code: "custom",
+        path: ["SSO_ISSUER"],
+        message: "SSO endpoints must use HTTPS in production",
+      });
+    }
+    if (jwks.origin !== issuer.origin) {
+      context.addIssue({
+        code: "custom",
+        path: ["SSO_JWKS_URL"],
+        message: "SSO_JWKS_URL must use the configured issuer origin",
+      });
+    }
+    if (resource.origin !== hubOrigin.origin) {
+      context.addIssue({
+        code: "custom",
+        path: ["SSO_RESOURCE"],
+        message: "SSO_RESOURCE must identify the Hub origin",
+      });
+    }
+    if (
+      hubOrigin.protocol !== "https:" ||
+      redirect.origin !== hubOrigin.origin ||
+      redirect.pathname !== "/auth/callback" ||
+      redirect.search ||
+      redirect.hash
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["SSO_REDIRECT_URI"],
+        message: "SSO redirect must be the HTTPS Hub /auth/callback URL",
       });
     }
   });
