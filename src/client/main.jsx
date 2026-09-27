@@ -21,12 +21,32 @@ import {
 import "./styles.css";
 
 const navigation = [
-  { capability: "services:read", icon: Gauge, label: "Overview", active: true },
-  { capability: "infrastructure:read", icon: Server, label: "Infrastructure" },
-  { capability: "operations:read", icon: Activity, label: "Operations" },
-  { capability: "support:read", icon: Users, label: "Support" },
-  { capability: "sales:read", icon: ShoppingBag, label: "Sales" },
-  { capability: "audit:read", icon: ClipboardList, label: "Audit log" },
+  { key: "overview", capability: "services:read", icon: Gauge, label: "Overview" },
+  { key: "infrastructure", capability: "infrastructure:read", icon: Server, label: "Infrastructure" },
+  { key: "operations", capability: "operations:read", icon: Activity, label: "Operations" },
+  { key: "support", capability: "support:read", icon: Users, label: "Support" },
+  { key: "sales", capability: "sales:read", icon: ShoppingBag, label: "Sales" },
+  { key: "audit", capability: "audit:read", icon: ClipboardList, label: "Audit log" },
+];
+
+const roleLabels = {
+  founder: "Founder",
+  management: "Management",
+  platform_admin: "Administrator",
+  developer: "Developer",
+  infrastructure: "Infrastructure",
+  support: "Support",
+  sales: "Sales",
+};
+
+const rolePriority = [
+  "founder",
+  "management",
+  "platform_admin",
+  "developer",
+  "infrastructure",
+  "support",
+  "sales",
 ];
 
 function greeting(date) {
@@ -50,6 +70,26 @@ function infrastructureLabel(state) {
 
 function auditAction(action) {
   return action.replaceAll(".", " · ").replaceAll("_", " ");
+}
+
+function userDisplayName(user) {
+  if (user?.name?.trim()) return user.name.trim();
+  const emailName = user?.email?.split("@")[0]?.replaceAll(/[._-]+/g, " ").trim();
+  if (emailName) {
+    return emailName.replaceAll(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+  return "Legacy Hosting user";
+}
+
+function userInitials(name) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  return initials || "LH";
 }
 
 function AuthGate({ state, authError }) {
@@ -114,6 +154,8 @@ function App() {
     events: [],
     nextCursor: null,
   });
+  const [activeSection, setActiveSection] = useState("overview");
+  const [showLogout, setShowLogout] = useState(false);
   const authError = new URLSearchParams(window.location.search).has("auth_error");
 
   useEffect(() => {
@@ -227,12 +269,18 @@ function App() {
     }).format(now),
     [now],
   );
-  const displayName = auth.user?.name?.split(" ")[0] || "Legacy Hosting";
+  const fullName = userDisplayName(auth.user);
+  const displayName = fullName.split(" ")[0];
   const authenticated = auth.state === "authenticated";
   const canViewInfrastructure = auth.capabilities.includes("infrastructure:read");
   const canViewOperations = auth.capabilities.includes("operations:read");
   const canViewAudit = auth.capabilities.includes("audit:read");
   const visibleNavigation = navigation.filter((item) => auth.capabilities.includes(item.capability));
+  const activeNavigation = visibleNavigation.find((item) => item.key === activeSection)
+    ?? visibleNavigation[0]
+    ?? navigation[0];
+  const primaryRole = rolePriority.find((role) => auth.user?.roles?.includes(role));
+  const roleLabel = roleLabels[primaryRole] ?? "Staff member";
 
   async function loadMoreAudit() {
     if (!audit.nextCursor || audit.state === "loading-more") return;
@@ -260,42 +308,66 @@ function App() {
       <aside>
         <div className="brand"><span>L</span><div><strong>Legacy Hosting</strong><small>Staff Hub</small></div></div>
         <nav aria-label="Hub navigation">
-          {visibleNavigation.map(({ active, icon: Icon, label }) => (
-            <button className={active ? "active" : undefined} disabled={!active} key={label}>
+          {visibleNavigation.map(({ key, icon: Icon, label }) => (
+            <button
+              className={activeNavigation.key === key ? "active" : undefined}
+              key={key}
+              type="button"
+              aria-current={activeNavigation.key === key ? "page" : undefined}
+              onClick={() => setActiveSection(key)}
+            >
               <Icon size={18} />{label}
             </button>
           ))}
         </nav>
-        <div className="guard"><ShieldCheck size={18} /><span>Protected by LH-SSO</span></div>
+        <div className="sidebar-profile">
+          <div className="avatar">{userInitials(fullName)}</div>
+          <div className="sidebar-profile-copy"><b>{fullName}</b><small>{roleLabel}</small></div>
+          <button
+            className="profile-action"
+            type="button"
+            aria-label="Sign out"
+            title="Sign out"
+            onClick={() => setShowLogout(true)}
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
       </aside>
       <main>
         <header>
-          <div><span>Internal operations</span><h1>{greeting(now)}, {displayName}</h1></div>
+          <div>
+            <span>{activeNavigation.key === "overview" ? "Staff Hub" : "Internal operations"}</span>
+            <h1>{activeNavigation.key === "overview" ? `${greeting(now)}, ${displayName}` : activeNavigation.label}</h1>
+          </div>
           <div className={`health ${health}`}><i />Hub {health}</div>
         </header>
         <section className="content">
-          <div className="notice authenticated">
-            <div className="notice-icon"><ShieldCheck size={25} /></div>
-            <div className="notice-copy"><span>Authenticated by LH-SSO</span><h2>Staff access active</h2><p>{auth.user.email || auth.user.name || auth.user.sub}</p><div className="roles">{auth.user.roles.map((role) => <b key={role}>{role.replaceAll("_", " ")}</b>)}</div></div>
-            <form action="/auth/logout" method="post"><button className="secondary" type="submit"><LogOut size={16} />Sign out</button></form>
-          </div>
+          {activeNavigation.key === "overview" && (
+            <>
+              <div className="notice authenticated">
+                <div className="notice-icon"><ShieldCheck size={25} /></div>
+                <div className="notice-copy"><span>Authenticated by LH-SSO</span><h2>Staff access active</h2><p>{auth.user.email || fullName}</p><div className="roles">{auth.user.roles.map((role) => <b key={role}>{role.replaceAll("_", " ")}</b>)}</div></div>
+              </div>
 
-          <div className="section-title"><div><span>Live checks</span><h2>Service overview</h2></div><p>No provider credential is ever sent to the browser.</p></div>
-          <div className="grid">
-            {services.map((item) => {
-              const Icon = item.icon || Activity;
-              return (
-                <article key={item.key || item.title}>
-                  <div><Icon size={20} /></div>
-                  <h3>{item.name || item.title}</h3>
-                  <p>{item.text || `Latest server-side check: ${item.checkedAt}`}</p>
-                  <span className={item.state || "locked"}>{item.state ? `${item.state} · ${item.latencyMs ?? "–"} ms` : "Sign-in required"}</span>
-                </article>
-              );
-            })}
-          </div>
+              <div className="section-title"><div><span>Live checks</span><h2>Service overview</h2></div><p>No provider credential is ever sent to the browser.</p></div>
+              <div className="grid">
+                {services.map((item) => {
+                  const Icon = item.icon || Activity;
+                  return (
+                    <article key={item.key || item.title}>
+                      <div><Icon size={20} /></div>
+                      <h3>{item.name || item.title}</h3>
+                      <p>{item.text || `Latest server-side check: ${item.checkedAt}`}</p>
+                      <span className={item.state || "locked"}>{item.state ? `${item.state} · ${item.latencyMs ?? "–"} ms` : "Sign-in required"}</span>
+                    </article>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
-          {authenticated && canViewOperations && (
+          {activeNavigation.key === "operations" && canViewOperations && (
             <>
               <div className="section-title operations-title">
                 <div><span>Operations</span><h2>Platform activity</h2></div>
@@ -347,7 +419,7 @@ function App() {
             </>
           )}
 
-          {authenticated && canViewInfrastructure && (
+          {activeNavigation.key === "infrastructure" && canViewInfrastructure && (
             <>
               <div className="section-title infrastructure-title">
                 <div><span>Infrastructure</span><h2>Droplet capacity</h2></div>
@@ -379,7 +451,25 @@ function App() {
             </>
           )}
 
-          {authenticated && canViewAudit && (
+          {activeNavigation.key === "support" && (
+            <div className="workspace-card">
+              <div className="workspace-icon"><Users size={24} /></div>
+              <span>Customer care</span>
+              <h2>Support workspace</h2>
+              <p>Support access is active. Customer cases and audited support sessions will appear here when the support data source is connected.</p>
+            </div>
+          )}
+
+          {activeNavigation.key === "sales" && (
+            <div className="workspace-card">
+              <div className="workspace-icon"><ShoppingBag size={24} /></div>
+              <span>Commercial operations</span>
+              <h2>Sales workspace</h2>
+              <p>Sales access is active. Leads, offers, and account activity will appear here when the sales data source is connected.</p>
+            </div>
+          )}
+
+          {activeNavigation.key === "audit" && canViewAudit && (
             <>
               <div className="section-title audit-title">
                 <div><span>Security</span><h2>Audit log</h2></div>
@@ -411,8 +501,25 @@ function App() {
             </>
           )}
         </section>
-        <footer><span>LH-Hub v{packageMetadata.version}</span><span>{clock}</span></footer>
+        <footer>
+          <span>LH-Hub v{packageMetadata.version}</span>
+          <span>Copyright 2009 © 2026 <a href="https://legacyhosting.xyz">Legacy Hosting</a></span>
+          <span>{clock}</span>
+        </footer>
       </main>
+      {showLogout && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowLogout(false)}>
+          <section className="logout-modal" role="dialog" aria-modal="true" aria-labelledby="logout-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-icon"><LogOut size={21} /></div>
+            <h2 id="logout-title">Sign out?</h2>
+            <p>Your Staff Hub session and central Legacy Hosting SSO session will be closed.</p>
+            <div className="modal-actions">
+              <button className="secondary" type="button" onClick={() => setShowLogout(false)}>Cancel</button>
+              <form action="/auth/logout" method="post"><button className="primary" type="submit">Sign out</button></form>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
