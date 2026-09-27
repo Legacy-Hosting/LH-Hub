@@ -242,6 +242,34 @@ export async function buildApp(options: {
     return reply.status(204).send();
   });
 
+  app.post("/api/v1/client-diagnostics", {
+    config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
+  }, async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!validBrowserOrigin(request.headers.origin)) return reply.status(403).send({ error: "invalid_origin" });
+    const body = z.object({
+      version: z.string().max(20),
+      path: z.string().startsWith("/").max(120),
+      state: z.enum(["shell", "auth", "error", "bootstrap", "empty"]),
+      blank: z.boolean(),
+      rootChildCount: z.number().int().min(0).max(100),
+      rootTextLength: z.number().int().min(0).max(100_000),
+      visibleTextLength: z.number().int().min(0).max(100_000),
+      shellHeight: z.number().int().min(0).max(100_000),
+      headerHeight: z.number().int().min(0).max(100_000),
+      asideWidth: z.number().int().min(0).max(100_000),
+      viewportWidth: z.number().int().min(0).max(100_000),
+      viewportHeight: z.number().int().min(0).max(100_000),
+      topElement: z.string().max(30),
+      runtimeError: z.string().max(200),
+    }).strict().safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_client_diagnostic" });
+    request.log.info({ clientDiagnostic: body.data }, "Staff Hub client visibility diagnostic");
+    return reply.status(204).send();
+  });
+
   app.get("/api/v1/session", async (request, reply) => {
     reply.header("Cache-Control", "no-store");
     const authorization = await requireStaff(

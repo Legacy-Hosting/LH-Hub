@@ -236,7 +236,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-    version: "0.7.7",
+    version: "0.7.8",
   });
 });
 
@@ -413,6 +413,48 @@ test("client render failures are accepted only from an authenticated Hub page", 
   const accepted = await app.inject({
     method: "POST",
     url: "/api/v1/client-errors",
+    headers: { authorization: "Bearer admin-token", origin: "https://hub.legacyhosting.xyz" },
+    payload,
+  });
+  assert.equal(accepted.statusCode, 204);
+});
+
+test("client visibility diagnostics require a same-origin staff session", async () => {
+  const payload = {
+    version: "0.7.8",
+    path: "/infrastructure",
+    state: "shell",
+    blank: false,
+    rootChildCount: 1,
+    rootTextLength: 100,
+    visibleTextLength: 100,
+    shellHeight: 900,
+    headerHeight: 90,
+    asideWidth: 244,
+    viewportWidth: 1600,
+    viewportHeight: 900,
+    topElement: "ASIDE",
+    runtimeError: "",
+  };
+  const missing = await app.inject({
+    method: "POST",
+    url: "/api/v1/client-diagnostics",
+    headers: { origin: "https://hub.legacyhosting.xyz" },
+    payload,
+  });
+  assert.equal(missing.statusCode, 401);
+
+  const foreign = await app.inject({
+    method: "POST",
+    url: "/api/v1/client-diagnostics",
+    headers: { authorization: "Bearer admin-token", origin: "https://attacker.invalid" },
+    payload,
+  });
+  assert.equal(foreign.statusCode, 403);
+
+  const accepted = await app.inject({
+    method: "POST",
+    url: "/api/v1/client-diagnostics",
     headers: { authorization: "Bearer admin-token", origin: "https://hub.legacyhosting.xyz" },
     payload,
   });
