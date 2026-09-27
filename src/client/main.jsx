@@ -81,6 +81,11 @@ function App() {
     fetchedAt: null,
     droplets: [],
   });
+  const [operations, setOperations] = useState({
+    state: "loading",
+    platform: null,
+    publicStatus: null,
+  });
   const [audit, setAudit] = useState({
     state: "loading",
     events: [],
@@ -102,11 +107,15 @@ function App() {
       if (refreshing) return;
       refreshing = true;
       const canViewInfrastructure = capabilities.includes("infrastructure:read");
+      const canViewOperations = capabilities.includes("operations:read");
       const canViewAudit = capabilities.includes("audit:read");
-      const [overviewResult, infrastructureResult, auditResult] = await Promise.allSettled([
+      const [overviewResult, infrastructureResult, operationsResult, auditResult] = await Promise.allSettled([
         jsonResponse("/api/v1/overview"),
         canViewInfrastructure
           ? jsonResponse("/api/v1/infrastructure")
+          : Promise.resolve(null),
+        canViewOperations
+          ? jsonResponse("/api/v1/operations")
           : Promise.resolve(null),
         canViewAudit
           ? jsonResponse("/api/v1/audit-events")
@@ -129,6 +138,17 @@ function App() {
             ...current,
             state: current.droplets.length > 0 ? "stale" : "unavailable",
           }));
+        }
+        if (canViewOperations && operationsResult.status === "fulfilled" && operationsResult.value) {
+          const platform = operationsResult.value.platform?.data ?? null;
+          const publicStatus = operationsResult.value.publicStatus?.data ?? null;
+          setOperations({
+            state: platform && publicStatus ? "ready" : platform || publicStatus ? "partial" : "unavailable",
+            platform,
+            publicStatus,
+          });
+        } else if (canViewOperations) {
+          setOperations((current) => ({ ...current, state: "unavailable" }));
         }
         if (canViewAudit && auditResult.status === "fulfilled" && auditResult.value) {
           setAudit({ state: "ready", ...auditResult.value });
@@ -187,6 +207,7 @@ function App() {
   const displayName = auth.user?.name?.split(" ")[0] || "Legacy Hosting";
   const authenticated = auth.state === "authenticated";
   const canViewInfrastructure = auth.capabilities.includes("infrastructure:read");
+  const canViewOperations = auth.capabilities.includes("operations:read");
   const canViewAudit = auth.capabilities.includes("audit:read");
   const visibleNavigation = authenticated
     ? navigation.filter((item) => auth.capabilities.includes(item.capability))
@@ -257,6 +278,58 @@ function App() {
             })}
           </div>
 
+          {authenticated && canViewOperations && (
+            <>
+              <div className="section-title operations-title">
+                <div><span>Operations</span><h2>Platform activity</h2></div>
+                <p className={`provider-state ${operations.state}`}>{operations.state === "ready" ? "Live data from LH-API and LH-Status" : operations.state === "partial" ? "One operational source is temporarily unavailable" : "Operational data is temporarily unavailable"}</p>
+              </div>
+              {operations.platform ? (
+                <div className="operations-summary">
+                  <article><HardDrive size={18} /><div><span>Database</span><strong>{operations.platform.database.state}</strong><small>LH-API connection</small></div></article>
+                  <article><Server size={18} /><div><span>Agents</span><strong>{operations.platform.agents.online} / {operations.platform.agents.total}</strong><small>online nodes</small></div></article>
+                  <article><Gauge size={18} /><div><span>Applications</span><strong>{operations.platform.applications.running} / {operations.platform.applications.total}</strong><small>running</small></div></article>
+                  <article><Activity size={18} /><div><span>Deployments · 24h</span><strong>{operations.platform.deployments.total}</strong><small>{operations.platform.deployments.successRate === null ? "No completed deployments" : `${operations.platform.deployments.successRate}% success`}</small></div></article>
+                </div>
+              ) : (
+                <div className="operations-panel empty-state"><Activity size={24} /><p>Platform activity could not be loaded</p></div>
+              )}
+              <div className="operations-columns">
+                <div className="operations-panel">
+                  <div className="panel-heading"><div><span>Deployments</span><h3>Recent activity</h3></div>{operations.platform && <small>{operations.platform.deployments.inProgress} active · {operations.platform.deployments.failed} failed</small>}</div>
+                  {!operations.platform || operations.platform.deployments.recent.length === 0 ? (
+                    <div className="empty-state compact"><p>No recent deployments</p></div>
+                  ) : (
+                    <ol className="deployment-list">
+                      {operations.platform.deployments.recent.map((deployment) => (
+                        <li key={deployment.id}>
+                          <div><strong>{deployment.applicationName}</strong><small>{deployment.teamName} · {deployment.source.replaceAll("_", " ")}</small></div>
+                          <span className={deployment.status}>{deployment.status.replaceAll("_", " ")}</span>
+                          <time dateTime={deployment.createdAt}>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(deployment.createdAt))}</time>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </div>
+                <div className="operations-panel">
+                  <div className="panel-heading"><div><span>Public status</span><h3>{operations.publicStatus?.overall.replaceAll("_", " ") || "Unavailable"}</h3></div>{operations.publicStatus && <small>{operations.publicStatus.stale ? "stale snapshot" : "live snapshot"}</small>}</div>
+                  {!operations.publicStatus ? (
+                    <div className="empty-state compact"><p>LH-Status could not be loaded</p></div>
+                  ) : (
+                    <div className="component-list">
+                      {operations.publicStatus.components.map((component) => (
+                        <div key={component.key}><i className={component.state} /><span>{component.name}</span><strong>{component.state}</strong></div>
+                      ))}
+                      {operations.publicStatus.events.filter((event) => !["resolved", "completed"].includes(event.status)).slice(0, 3).map((event) => (
+                        <div className="status-event" key={event.id}><Activity size={14} /><span>{event.title}</span><strong>{event.status.replaceAll("_", " ")}</strong></div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
           {authenticated && canViewInfrastructure && (
             <>
               <div className="section-title infrastructure-title">
@@ -321,7 +394,7 @@ function App() {
             </>
           )}
         </section>
-        <footer><span>LH-Hub v0.5.0</span><span>{clock}</span></footer>
+        <footer><span>LH-Hub v0.6.0</span><span>{clock}</span></footer>
       </main>
     </div>
   );

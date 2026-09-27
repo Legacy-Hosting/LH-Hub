@@ -16,6 +16,8 @@ Hub access is capability-based after SSO authentication. Founder, Management, an
 
 The audit view reads the authoritative `audit_events` stream from LH-API. Hub forwards the current user's short-lived SSO access token only from its backend; the browser never receives that token. LH-API independently verifies the SSO signature, issuer, `lh-hub` audience, token age, and staff role before returning a cursor-paginated result. Secret-like metadata keys are recursively redacted before events leave the API.
 
+The operations view combines a bounded LH-API summary with the public LH-Status snapshot. Database state, Agent heartbeats, application counts, 24-hour deployment results, recent deployments, public component state, and active incidents are fetched server-side. A failure in one upstream is isolated so the other source can still render. Hub never connects directly to MySQL and caches the public status snapshot briefly to avoid unnecessary probes.
+
 ## Development
 
 ```bash
@@ -32,4 +34,4 @@ Tags named `v*` publish immutable archives to `LH-Releases/LH-Hub` and checksums
 ops/scripts/deploy-release.sh ARCHIVE CHECKSUM VERSION
 ```
 
-Production requires `/etc/legacy-hosting/hub.env` with mode `0600`, `API_ORIGIN=https://api.legacyhosting.xyz`, a valid certificate for `hub.legacyhosting.xyz`, and a live LH-SSO issuer. The release is installed below `/opt/legacy-hosting/hub/releases`.
+Production requires `/etc/legacy-hosting/hub.env` with mode `0600`, `API_ORIGIN=https://api.legacyhosting.xyz`, `STATUS_API_URL=https://status.legacyhosting.xyz/api/v1/status`, a valid certificate for `hub.legacyhosting.xyz`, and a live LH-SSO issuer. The release is installed below `/opt/legacy-hosting/hub/releases`.

@@ -82,6 +82,28 @@ before(async () => {
         nextCursor: null,
       };
     },
+    operationsReader: async (accessToken) => {
+      assert.ok([
+        "staff-token",
+        "infrastructure-token",
+        "browser-access-token",
+      ].includes(accessToken));
+      return {
+        generatedAt: "2026-09-27T10:00:00.000Z",
+        database: { state: "connected" },
+        applications: { total: 3, running: 2, failed: 1, deploying: 0, stopped: 0, pending: 0 },
+        agents: { total: 2, online: 2, offline: 0, pending: 0, draining: 0, lastHeartbeatAt: "2026-09-27T09:59:55.000Z" },
+        deployments: { windowHours: 24, total: 2, succeeded: 1, failed: 1, inProgress: 0, queued: 0, cancelled: 0, successRate: 50, recent: [] },
+      };
+    },
+    publicStatusReader: async () => ({
+      version: 2,
+      overall: "operational",
+      generatedAt: "2026-09-27T10:00:00.000Z",
+      stale: false,
+      components: [],
+      events: [],
+    }),
   });
 });
 
@@ -95,7 +117,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-    version: "0.5.0",
+    version: "0.6.0",
   });
 });
 
@@ -222,6 +244,25 @@ test("audit events are proxied only for audit-capable staff", async () => {
     method: "GET",
     url: "/api/v1/audit-events",
     headers: { authorization: "Bearer infrastructure-token" },
+  });
+  assert.equal(denied.statusCode, 403);
+});
+
+test("operations combine the protected API summary and public status snapshot", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/v1/operations",
+    headers: { authorization: "Bearer infrastructure-token" },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().platform.state, "ready");
+  assert.equal(response.json().platform.data.agents.online, 2);
+  assert.equal(response.json().publicStatus.data.overall, "operational");
+
+  const denied = await app.inject({
+    method: "GET",
+    url: "/api/v1/operations",
+    headers: { authorization: "Bearer staff-token" },
   });
   assert.equal(denied.statusCode, 403);
 });

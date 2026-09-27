@@ -8,6 +8,7 @@ import { env } from "./config.js";
 import { createDigitalOceanInfrastructureReader } from "./digitalocean.js";
 import { createHubOidcProtocol } from "./oidc-client.js";
 import { createAuditReader } from "./audit.js";
+import { createOperationsReader, createPublicStatusReader } from "./operations.js";
 
 const tokenVerifier =
   env.SSO_ISSUER && env.SSO_JWKS_URL
@@ -52,12 +53,22 @@ const auditReader = createAuditReader({
   apiOrigin: env.API_ORIGIN,
   timeoutMs: env.API_REQUEST_TIMEOUT_MS,
 });
+const operationsReader = createOperationsReader({
+  apiOrigin: env.API_ORIGIN,
+  timeoutMs: env.API_REQUEST_TIMEOUT_MS,
+});
+const publicStatusReader = createPublicStatusReader({
+  statusUrl: env.STATUS_API_URL,
+  timeoutMs: env.SERVICE_HEALTH_TIMEOUT_MS,
+});
 const app = await buildApp({
   ...(tokenVerifier ? { tokenVerifier } : {}),
   ...(browserAuth ? { browserAuth } : {}),
   ...(logoutTokenVerifier ? { logoutTokenVerifier } : {}),
   infrastructureReader,
   auditReader,
+  operationsReader,
+  publicStatusReader,
 });
 
 const shutdown = async (signal: string) => {

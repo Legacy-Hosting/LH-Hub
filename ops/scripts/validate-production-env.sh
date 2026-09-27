@@ -18,7 +18,7 @@ set -a
 set +a
 required=(NODE_ENV HOST PORT SSO_ISSUER SSO_AUDIENCE SSO_JWKS_URL SSO_CLIENT_ID \
   SSO_CLIENT_SECRET SSO_REDIRECT_URI SSO_RESOURCE SSO_REQUEST_TIMEOUT_MS HUB_ORIGIN HUB_SESSION_TTL_SECONDS \
-  API_ORIGIN API_REQUEST_TIMEOUT_MS \
+  API_ORIGIN API_REQUEST_TIMEOUT_MS STATUS_API_URL \
   SERVICE_HEALTH_TARGETS DIGITALOCEAN_TOKEN DIGITALOCEAN_REQUEST_TIMEOUT_MS \
   DIGITALOCEAN_CACHE_TTL_MS DIGITALOCEAN_METRIC_WINDOW_SECONDS)
 for name in "${required[@]}"; do
@@ -33,7 +33,8 @@ if [[ $NODE_ENV != production || $HOST != 127.0.0.1 || $PORT != 8081 ]]; then
 fi
 if [[ $SSO_ISSUER != https://* || $SSO_JWKS_URL != https://* || \
       $SSO_REDIRECT_URI != https://* || $SSO_RESOURCE != https://* || \
-      $HUB_ORIGIN != https://* || $API_ORIGIN != https://* ]]; then
+      $HUB_ORIGIN != https://* || $API_ORIGIN != https://* || \
+      $STATUS_API_URL != https://* ]]; then
   echo "Hub SSO endpoints must use HTTPS" >&2
   exit 1
 fi
@@ -79,7 +80,7 @@ if [[ ! $DIGITALOCEAN_METRIC_WINDOW_SECONDS =~ ^[0-9]+$ ]] || \
   echo "DIGITALOCEAN_METRIC_WINDOW_SECONDS must be between 600 and 86400" >&2
   exit 1
 fi
-if ! node -e 'const issuer=new URL(process.env.SSO_ISSUER); const jwks=new URL(process.env.SSO_JWKS_URL); const hub=new URL(process.env.HUB_ORIGIN); const resource=new URL(process.env.SSO_RESOURCE); const api=new URL(process.env.API_ORIGIN); if(jwks.origin!==issuer.origin||resource.origin!==hub.origin||api.pathname!=="/"||api.search||api.hash||api.username||api.password) process.exit(1)'; then
+if ! node -e 'const issuer=new URL(process.env.SSO_ISSUER); const jwks=new URL(process.env.SSO_JWKS_URL); const hub=new URL(process.env.HUB_ORIGIN); const resource=new URL(process.env.SSO_RESOURCE); const api=new URL(process.env.API_ORIGIN); const status=new URL(process.env.STATUS_API_URL); if(jwks.origin!==issuer.origin||resource.origin!==hub.origin||api.pathname!=="/"||api.search||api.hash||api.username||api.password||status.pathname!=="/api/v1/status"||status.search||status.hash||status.username||status.password) process.exit(1)'; then
   echo "Hub SSO issuer, JWKS, resource, and origin do not match" >&2
   exit 1
 fi

@@ -31,6 +31,7 @@ const schema = z
     HUB_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(28_800).default(28_800),
     API_ORIGIN: z.string().url().default("http://localhost:8080"),
     API_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(15_000).default(5_000),
+    STATUS_API_URL: z.string().url().default("https://status.legacyhosting.xyz/api/v1/status"),
     SERVICE_HEALTH_TARGETS: z.string().default(defaultTargets),
     SERVICE_HEALTH_TIMEOUT_MS: z.coerce
       .number()
@@ -85,6 +86,7 @@ const schema = z
       });
     }
     const apiOrigin = new URL(value.API_ORIGIN);
+    const statusApiUrl = new URL(value.STATUS_API_URL);
     if (
       apiOrigin.protocol !== "https:" ||
       apiOrigin.pathname !== "/" ||
@@ -97,6 +99,20 @@ const schema = z
         code: "custom",
         path: ["API_ORIGIN"],
         message: "API_ORIGIN must be a credential-free HTTPS origin in production",
+      });
+    }
+    if (
+      statusApiUrl.protocol !== "https:" ||
+      statusApiUrl.pathname !== "/api/v1/status" ||
+      statusApiUrl.search ||
+      statusApiUrl.hash ||
+      statusApiUrl.username ||
+      statusApiUrl.password
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["STATUS_API_URL"],
+        message: "STATUS_API_URL must be a credential-free HTTPS status endpoint in production",
       });
     }
     if (value.DIGITALOCEAN_TOKEN?.includes("replace-with")) {

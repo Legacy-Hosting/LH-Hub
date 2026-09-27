@@ -16,6 +16,7 @@ import type { BrowserAuthService } from "./browser-auth.js";
 import { env, healthTargets } from "./config.js";
 import type { InfrastructureReader } from "./digitalocean.js";
 import type { AuditReader } from "./audit.js";
+import type { OperationsReader, PublicStatusReader } from "./operations.js";
 import {
   createServiceHealthReader,
   type FetchImplementation,
@@ -30,6 +31,8 @@ export async function buildApp(options: {
   infrastructureReader?: InfrastructureReader;
   logoutTokenVerifier?: LogoutTokenVerifier;
   auditReader?: AuditReader;
+  operationsReader?: OperationsReader;
+  publicStatusReader?: PublicStatusReader;
 } = {}) {
   const app = Fastify({
     logger: env.NODE_ENV === "production",
@@ -192,7 +195,7 @@ export async function buildApp(options: {
   app.get("/health", async () => ({
     status: "ok",
     service: "LH-Hub",
-    version: "0.5.0",
+    version: "0.6.0",
   }));
 
   app.get("/api/v1/session", async (request, reply) => {
@@ -241,6 +244,41 @@ export async function buildApp(options: {
       return { state: "not_configured", fetchedAt: null, droplets: [] };
     }
     return options.infrastructureReader();
+  });
+
+  app.get("/api/v1/operations", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(
+      request.headers.authorization,
+      request.headers.cookie,
+    );
+    if ("error" in authorization) {
+      return reply.status(authorization.statusCode).send({ error: authorization.error });
+    }
+    if (!hasCapability(authorization.identity, "operations:read")) {
+      return reply.status(403).send({ error: "insufficient_hub_access" });
+    }
+    const [platform, publicStatus] = await Promise.allSettled([
+      options.operationsReader?.(authorization.accessToken) ??
+        Promise.reject(new Error("operations_not_configured")),
+      options.publicStatusReader?.() ??
+        Promise.reject(new Error("status_not_configured")),
+    ]);
+    if (platform.status === "rejected") {
+      request.log.warn("LH-API operations summary could not be read");
+    }
+    if (publicStatus.status === "rejected") {
+      request.log.warn("LH-Status snapshot could not be read");
+    }
+    return {
+      generatedAt: new Date().toISOString(),
+      platform: platform.status === "fulfilled"
+        ? { state: "ready", data: platform.value }
+        : { state: "unavailable", data: null },
+      publicStatus: publicStatus.status === "fulfilled"
+        ? { state: "ready", data: publicStatus.value }
+        : { state: "unavailable", data: null },
+    };
   });
 
   app.get("/api/v1/audit-events", async (request, reply) => {
