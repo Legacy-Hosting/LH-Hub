@@ -7,6 +7,7 @@ import { createBrowserAuth } from "./browser-auth.js";
 import { env } from "./config.js";
 import { createDigitalOceanInfrastructureReader } from "./digitalocean.js";
 import { createHubOidcProtocol } from "./oidc-client.js";
+import { createAuditReader } from "./audit.js";
 
 const tokenVerifier =
   env.SSO_ISSUER && env.SSO_JWKS_URL
@@ -47,11 +48,16 @@ const infrastructureReader = createDigitalOceanInfrastructureReader({
   cacheMs: env.DIGITALOCEAN_CACHE_TTL_MS,
   metricWindowSeconds: env.DIGITALOCEAN_METRIC_WINDOW_SECONDS,
 });
+const auditReader = createAuditReader({
+  apiOrigin: env.API_ORIGIN,
+  timeoutMs: env.API_REQUEST_TIMEOUT_MS,
+});
 const app = await buildApp({
   ...(tokenVerifier ? { tokenVerifier } : {}),
   ...(browserAuth ? { browserAuth } : {}),
   ...(logoutTokenVerifier ? { logoutTokenVerifier } : {}),
   infrastructureReader,
+  auditReader,
 });
 
 const shutdown = async (signal: string) => {

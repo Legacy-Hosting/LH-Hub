@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
+  ClipboardList,
   Cpu,
   Gauge,
   HardDrive,
@@ -10,6 +11,7 @@ import {
   LogOut,
   MemoryStick,
   Network,
+  RefreshCw,
   Server,
   ShieldCheck,
   ShoppingBag,
@@ -30,6 +32,7 @@ const navigation = [
   { capability: "operations:read", icon: Activity, label: "Operations" },
   { capability: "support:read", icon: Users, label: "Support" },
   { capability: "sales:read", icon: ShoppingBag, label: "Sales" },
+  { capability: "audit:read", icon: ClipboardList, label: "Audit log" },
 ];
 
 function greeting(date) {
@@ -49,6 +52,10 @@ function infrastructureLabel(state) {
   if (state === "not_configured") return "DigitalOcean token is not configured";
   if (state === "loading") return "Loading DigitalOcean Insights";
   return "DigitalOcean Insights is temporarily unavailable";
+}
+
+function auditAction(action) {
+  return action.replaceAll(".", " · ").replaceAll("_", " ");
 }
 
 async function jsonResponse(url) {
@@ -74,6 +81,11 @@ function App() {
     fetchedAt: null,
     droplets: [],
   });
+  const [audit, setAudit] = useState({
+    state: "loading",
+    events: [],
+    nextCursor: null,
+  });
   const authError = new URLSearchParams(window.location.search).has("auth_error");
 
   useEffect(() => {
@@ -90,10 +102,14 @@ function App() {
       if (refreshing) return;
       refreshing = true;
       const canViewInfrastructure = capabilities.includes("infrastructure:read");
-      const [overviewResult, infrastructureResult] = await Promise.allSettled([
+      const canViewAudit = capabilities.includes("audit:read");
+      const [overviewResult, infrastructureResult, auditResult] = await Promise.allSettled([
         jsonResponse("/api/v1/overview"),
         canViewInfrastructure
           ? jsonResponse("/api/v1/infrastructure")
+          : Promise.resolve(null),
+        canViewAudit
+          ? jsonResponse("/api/v1/audit-events")
           : Promise.resolve(null),
       ]);
       if (active) {
@@ -113,6 +129,11 @@ function App() {
             ...current,
             state: current.droplets.length > 0 ? "stale" : "unavailable",
           }));
+        }
+        if (canViewAudit && auditResult.status === "fulfilled" && auditResult.value) {
+          setAudit({ state: "ready", ...auditResult.value });
+        } else if (canViewAudit) {
+          setAudit((current) => ({ ...current, state: "unavailable" }));
         }
       }
       refreshing = false;
@@ -166,9 +187,27 @@ function App() {
   const displayName = auth.user?.name?.split(" ")[0] || "Legacy Hosting";
   const authenticated = auth.state === "authenticated";
   const canViewInfrastructure = auth.capabilities.includes("infrastructure:read");
+  const canViewAudit = auth.capabilities.includes("audit:read");
   const visibleNavigation = authenticated
     ? navigation.filter((item) => auth.capabilities.includes(item.capability))
     : navigation.slice(0, 1);
+
+  async function loadMoreAudit() {
+    if (!audit.nextCursor || audit.state === "loading-more") return;
+    setAudit((current) => ({ ...current, state: "loading-more" }));
+    try {
+      const page = await jsonResponse(
+        `/api/v1/audit-events?cursor=${encodeURIComponent(audit.nextCursor)}`,
+      );
+      setAudit((current) => ({
+        state: "ready",
+        events: [...current.events, ...page.events],
+        nextCursor: page.nextCursor,
+      }));
+    } catch {
+      setAudit((current) => ({ ...current, state: "unavailable" }));
+    }
+  }
 
   return (
     <div className="shell">
@@ -249,8 +288,40 @@ function App() {
               </div>
             </>
           )}
+
+          {authenticated && canViewAudit && (
+            <>
+              <div className="section-title audit-title">
+                <div><span>Security</span><h2>Audit log</h2></div>
+                <p>Authoritative support and administration events from LH-API.</p>
+              </div>
+              <div className="audit-panel">
+                {audit.events.length === 0 ? (
+                  <div className="empty-state"><ClipboardList size={24} /><p>{audit.state === "unavailable" ? "Audit events are temporarily unavailable" : "No audit events recorded"}</p></div>
+                ) : (
+                  <ol className="audit-list">
+                    {audit.events.map((event) => (
+                      <li key={event.id}>
+                        <div className="audit-marker"><ClipboardList size={15} /></div>
+                        <div className="audit-copy">
+                          <strong>{auditAction(event.action)}</strong>
+                          <p>{event.actor?.name || "System"}{event.team ? ` · ${event.team.name}` : ""}{event.resource ? ` · ${event.resource.type}` : ""}</p>
+                        </div>
+                        <time dateTime={event.createdAt}>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(event.createdAt))}</time>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {audit.nextCursor && (
+                  <button className="audit-more secondary" type="button" onClick={loadMoreAudit} disabled={audit.state === "loading-more"}>
+                    <RefreshCw size={15} />{audit.state === "loading-more" ? "Loading" : "Load older events"}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </section>
-        <footer><span>LH-Hub v0.4.0</span><span>{clock}</span></footer>
+        <footer><span>LH-Hub v0.5.0</span><span>{clock}</span></footer>
       </main>
     </div>
   );

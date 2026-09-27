@@ -15,6 +15,7 @@ import {
 import type { BrowserAuthService } from "./browser-auth.js";
 import { env, healthTargets } from "./config.js";
 import type { InfrastructureReader } from "./digitalocean.js";
+import type { AuditReader } from "./audit.js";
 import {
   createServiceHealthReader,
   type FetchImplementation,
@@ -28,6 +29,7 @@ export async function buildApp(options: {
   fetchImplementation?: FetchImplementation;
   infrastructureReader?: InfrastructureReader;
   logoutTokenVerifier?: LogoutTokenVerifier;
+  auditReader?: AuditReader;
 } = {}) {
   const app = Fastify({
     logger: env.NODE_ENV === "production",
@@ -80,7 +82,7 @@ export async function buildApp(options: {
   }
 
   type AuthorizationResult =
-    | { identity: HubIdentity }
+    | { identity: HubIdentity; accessToken: string }
     | { error: string; statusCode: 401 | 403 | 503 };
 
   async function requireStaff(
@@ -92,16 +94,16 @@ export async function buildApp(options: {
       try {
         const identity = authorizeClaims(await options.tokenVerifier(token));
         if (!identity) return { error: "staff_access_required", statusCode: 403 } as const;
-        return { identity } as const;
+        return { identity, accessToken: token } as const;
       } catch {
         return { error: "invalid_access_token", statusCode: 401 } as const;
       }
     }
     if (options.browserAuth) {
-      const identity = await options.browserAuth.identity(
+      const authorization = await options.browserAuth.authorization(
         readCookie(cookie, cookieNames.session),
       );
-      if (identity) return { identity } as const;
+      if (authorization) return authorization;
     }
     if (!options.tokenVerifier && !options.browserAuth) {
       return { error: "sso_not_configured", statusCode: 503 } as const;
@@ -190,7 +192,7 @@ export async function buildApp(options: {
   app.get("/health", async () => ({
     status: "ok",
     service: "LH-Hub",
-    version: "0.4.0",
+    version: "0.5.0",
   }));
 
   app.get("/api/v1/session", async (request, reply) => {
@@ -239,6 +241,36 @@ export async function buildApp(options: {
       return { state: "not_configured", fetchedAt: null, droplets: [] };
     }
     return options.infrastructureReader();
+  });
+
+  app.get("/api/v1/audit-events", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(
+      request.headers.authorization,
+      request.headers.cookie,
+    );
+    if ("error" in authorization) {
+      return reply.status(authorization.statusCode).send({ error: authorization.error });
+    }
+    if (!hasCapability(authorization.identity, "audit:read")) {
+      return reply.status(403).send({ error: "insufficient_hub_access" });
+    }
+    if (!options.auditReader) {
+      return reply.status(503).send({ error: "audit_not_configured" });
+    }
+    const query = z.object({
+      cursor: z.string().min(1).max(1_024).optional(),
+    }).safeParse(request.query);
+    if (!query.success) return reply.status(400).send({ error: "validation_error" });
+    try {
+      return await options.auditReader({
+        accessToken: authorization.accessToken,
+        ...(query.data.cursor ? { cursor: query.data.cursor } : {}),
+      });
+    } catch {
+      request.log.warn("LH-API audit events could not be read");
+      return reply.status(502).send({ error: "audit_unavailable" });
+    }
   });
 
   return app;

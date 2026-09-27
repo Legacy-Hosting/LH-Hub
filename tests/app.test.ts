@@ -24,6 +24,12 @@ before(async () => {
       identity: async (token) => token === "s".repeat(43)
         ? { sub: "user-1", name: "Support", roles: ["support"] }
         : undefined,
+      authorization: async (token) => token === "s".repeat(43)
+        ? {
+            identity: { sub: "user-1", name: "Support", roles: ["support"] },
+            accessToken: "browser-access-token",
+          }
+        : undefined,
       logout: async (token) => {
         loggedOutToken = token;
         return "https://auth.legacyhosting.xyz/session/end?client_id=lh-hub";
@@ -60,6 +66,22 @@ before(async () => {
         publicBandwidthOutMbps: 0.1,
       }],
     }),
+    auditReader: async ({ accessToken }) => {
+      assert.ok(["staff-token", "browser-access-token"].includes(accessToken));
+      return {
+        events: [{
+          id: "1",
+          team: null,
+          actor: null,
+          product: "panel",
+          action: "team.updated",
+          resource: { type: "team", id: "team-1" },
+          metadata: null,
+          createdAt: "2026-09-27T09:00:00.000Z",
+        }],
+        nextCursor: null,
+      };
+    },
   });
 });
 
@@ -73,7 +95,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-    version: "0.4.0",
+    version: "0.5.0",
   });
 });
 
@@ -95,7 +117,7 @@ test("Hub APIs require an SSO bearer token and a staff role", async () => {
   });
   assert.equal(staff.statusCode, 200);
   assert.deepEqual(staff.json().user.roles, ["support"]);
-  assert.deepEqual(staff.json().capabilities, ["services:read", "support:read"]);
+  assert.deepEqual(staff.json().capabilities, ["services:read", "support:read", "audit:read"]);
 
   const browserSession = await app.inject({
     method: "GET",
@@ -185,4 +207,21 @@ test("service checks run server-side for authorized staff", async () => {
   assert.equal(infrastructure.json().state, "ready");
   assert.equal(infrastructure.json().droplets[0].name, "ams3-hub-01");
   assert.equal(JSON.stringify(infrastructure.json()).includes("token"), false);
+});
+
+test("audit events are proxied only for audit-capable staff", async () => {
+  const allowed = await app.inject({
+    method: "GET",
+    url: "/api/v1/audit-events",
+    headers: { authorization: "Bearer staff-token" },
+  });
+  assert.equal(allowed.statusCode, 200);
+  assert.equal(allowed.json().events[0].action, "team.updated");
+
+  const denied = await app.inject({
+    method: "GET",
+    url: "/api/v1/audit-events",
+    headers: { authorization: "Bearer infrastructure-token" },
+  });
+  assert.equal(denied.statusCode, 403);
 });

@@ -17,6 +17,7 @@ type LoginRequest = {
 
 type BrowserSession = {
   identity: HubIdentity;
+  accessToken: string;
   refreshToken?: string;
   accessTokenExpiresAt: number;
   expiresAt: number;
@@ -51,6 +52,10 @@ export type BrowserAuthService = {
     correlation: string | undefined,
   ): Promise<{ sessionToken: string; returnPath: string }>;
   identity(sessionToken: string | undefined): Promise<HubIdentity | undefined>;
+  authorization(sessionToken: string | undefined): Promise<{
+    identity: HubIdentity;
+    accessToken: string;
+  } | undefined>;
   logout(sessionToken: string | undefined): Promise<string>;
   revokeSubject(subject: string): Promise<number>;
 };
@@ -103,7 +108,7 @@ export function createBrowserAuth(options: {
 }): BrowserAuthService {
   const loginRequests = new Map<string, LoginRequest>();
   const sessions = new Map<string, BrowserSession>();
-  const refreshes = new Map<string, Promise<HubIdentity | undefined>>();
+  const refreshes = new Map<string, Promise<BrowserSession | undefined>>();
   const now = options.now ?? Date.now;
   const sessionLifetimeMs = (options.sessionLifetimeSeconds ?? 28_800) * 1_000;
   const issuerOrigin = new URL(options.issuer).origin;
@@ -138,17 +143,18 @@ export function createBrowserAuth(options: {
       const tokens = await options.protocol.refresh(session.refreshToken);
       const identity = await verifiedIdentity(tokens.accessToken);
       const timestamp = now();
-      if (session.expiresAt <= timestamp) {
+      if (session.expiresAt <= timestamp || sessions.get(sessionKey) !== session) {
         sessions.delete(sessionKey);
         return undefined;
       }
       sessions.set(sessionKey, {
         ...session,
         identity,
+        accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken ?? session.refreshToken,
         accessTokenExpiresAt: timestamp + tokens.expiresIn * 1_000,
       });
-      return identity;
+      return sessions.get(sessionKey);
     } catch {
       sessions.delete(sessionKey);
       return undefined;
@@ -230,6 +236,7 @@ export function createBrowserAuth(options: {
       const sessionToken = randomToken();
       sessions.set(tokenHash(sessionToken), {
         identity,
+        accessToken: tokens.accessToken,
         ...(tokens.refreshToken ? { refreshToken: tokens.refreshToken } : {}),
         accessTokenExpiresAt: timestamp + tokens.expiresIn * 1_000,
         expiresAt: timestamp + sessionLifetimeMs,
@@ -253,7 +260,29 @@ export function createBrowserAuth(options: {
         });
         refreshes.set(sessionKey, refresh);
       }
-      return refresh;
+      return (await refresh)?.identity;
+    },
+
+    async authorization(sessionToken) {
+      cleanup();
+      if (!sessionToken || !tokenPattern.test(sessionToken)) return undefined;
+      const sessionKey = tokenHash(sessionToken);
+      const session = sessions.get(sessionKey);
+      if (!session) return undefined;
+      if (session.accessTokenExpiresAt > now() + refreshBeforeExpiryMs) {
+        return { identity: session.identity, accessToken: session.accessToken };
+      }
+      let refresh = refreshes.get(sessionKey);
+      if (!refresh) {
+        refresh = refreshSession(sessionKey, session).finally(() => {
+          refreshes.delete(sessionKey);
+        });
+        refreshes.set(sessionKey, refresh);
+      }
+      const refreshed = await refresh;
+      return refreshed
+        ? { identity: refreshed.identity, accessToken: refreshed.accessToken }
+        : undefined;
     },
 
     async logout(sessionToken) {

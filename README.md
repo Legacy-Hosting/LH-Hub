@@ -12,7 +12,9 @@ Only a verified access token containing an allowlisted staff role creates a brow
 
 The infrastructure view reads Droplet metadata and DigitalOcean Insights only on the Hub server. Use a custom DigitalOcean token with `monitoring:read` and its required read scopes, including `droplet:read`, `regions:read`, `sizes:read`, `actions:read`, `image:read`, and `snapshot:read`. The token is never returned to the browser. Metrics are cached for two minutes by default, concurrent refreshes are deduplicated, and provider failures fall back to the last successful snapshot.
 
-Hub access is capability-based after SSO authentication. Founder, Management, and Administrator receive every Hub view. Developer and Infrastructure receive service, infrastructure, and operations views. Support receives service and support views, while Sales receives service and sales views. Sensitive infrastructure endpoints enforce the same matrix server-side, so hiding a navigation item is never the security boundary.
+Hub access is capability-based after SSO authentication. Founder, Management, and Administrator receive every Hub view. Developer and Infrastructure receive service, infrastructure, and operations views. Support receives service, support, and audit views, while Sales receives service and sales views. Sensitive endpoints enforce the same matrix server-side, so hiding a navigation item is never the security boundary.
+
+The audit view reads the authoritative `audit_events` stream from LH-API. Hub forwards the current user's short-lived SSO access token only from its backend; the browser never receives that token. LH-API independently verifies the SSO signature, issuer, `lh-hub` audience, token age, and staff role before returning a cursor-paginated result. Secret-like metadata keys are recursively redacted before events leave the API.
 
 ## Development
 
@@ -30,4 +32,4 @@ Tags named `v*` publish immutable archives to `LH-Releases/LH-Hub` and checksums
 ops/scripts/deploy-release.sh ARCHIVE CHECKSUM VERSION
 ```
 
-Production requires `/etc/legacy-hosting/hub.env` with mode `0600`, a valid certificate for `hub.legacyhosting.xyz`, and a live LH-SSO issuer. The release is installed below `/opt/legacy-hosting/hub/releases`.
+Production requires `/etc/legacy-hosting/hub.env` with mode `0600`, `API_ORIGIN=https://api.legacyhosting.xyz`, a valid certificate for `hub.legacyhosting.xyz`, and a live LH-SSO issuer. The release is installed below `/opt/legacy-hosting/hub/releases`.

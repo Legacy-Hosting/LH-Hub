@@ -17,6 +17,7 @@ export const hubCapabilities = [
   "operations:read",
   "support:read",
   "sales:read",
+  "audit:read",
 ] as const;
 
 export type StaffRole = (typeof staffRoles)[number];
@@ -28,7 +29,7 @@ const roleCapabilities: Record<StaffRole, readonly HubCapability[]> = {
   platform_admin: hubCapabilities,
   developer: ["services:read", "infrastructure:read", "operations:read"],
   infrastructure: ["services:read", "infrastructure:read", "operations:read"],
-  support: ["services:read", "support:read"],
+  support: ["services:read", "support:read", "audit:read"],
   sales: ["services:read", "sales:read"],
 };
 

@@ -29,6 +29,8 @@ const schema = z
     SSO_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(15_000).default(5_000),
     HUB_ORIGIN: z.string().url().default("http://localhost:5174"),
     HUB_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(28_800).default(28_800),
+    API_ORIGIN: z.string().url().default("http://localhost:8080"),
+    API_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(15_000).default(5_000),
     SERVICE_HEALTH_TARGETS: z.string().default(defaultTargets),
     SERVICE_HEALTH_TIMEOUT_MS: z.coerce
       .number()
@@ -80,6 +82,21 @@ const schema = z
         code: "custom",
         path: ["HOST"],
         message: "LH-Hub must listen on the local reverse-proxy interface",
+      });
+    }
+    const apiOrigin = new URL(value.API_ORIGIN);
+    if (
+      apiOrigin.protocol !== "https:" ||
+      apiOrigin.pathname !== "/" ||
+      apiOrigin.search ||
+      apiOrigin.hash ||
+      apiOrigin.username ||
+      apiOrigin.password
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["API_ORIGIN"],
+        message: "API_ORIGIN must be a credential-free HTTPS origin in production",
       });
     }
     if (value.DIGITALOCEAN_TOKEN?.includes("replace-with")) {

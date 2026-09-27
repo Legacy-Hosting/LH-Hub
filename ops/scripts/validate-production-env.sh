@@ -18,6 +18,7 @@ set -a
 set +a
 required=(NODE_ENV HOST PORT SSO_ISSUER SSO_AUDIENCE SSO_JWKS_URL SSO_CLIENT_ID \
   SSO_CLIENT_SECRET SSO_REDIRECT_URI SSO_RESOURCE SSO_REQUEST_TIMEOUT_MS HUB_ORIGIN HUB_SESSION_TTL_SECONDS \
+  API_ORIGIN API_REQUEST_TIMEOUT_MS \
   SERVICE_HEALTH_TARGETS DIGITALOCEAN_TOKEN DIGITALOCEAN_REQUEST_TIMEOUT_MS \
   DIGITALOCEAN_CACHE_TTL_MS DIGITALOCEAN_METRIC_WINDOW_SECONDS)
 for name in "${required[@]}"; do
@@ -32,7 +33,7 @@ if [[ $NODE_ENV != production || $HOST != 127.0.0.1 || $PORT != 8081 ]]; then
 fi
 if [[ $SSO_ISSUER != https://* || $SSO_JWKS_URL != https://* || \
       $SSO_REDIRECT_URI != https://* || $SSO_RESOURCE != https://* || \
-      $HUB_ORIGIN != https://* ]]; then
+      $HUB_ORIGIN != https://* || $API_ORIGIN != https://* ]]; then
   echo "Hub SSO endpoints must use HTTPS" >&2
   exit 1
 fi
@@ -58,6 +59,11 @@ if [[ ! $SSO_REQUEST_TIMEOUT_MS =~ ^[0-9]+$ ]] || \
   echo "SSO_REQUEST_TIMEOUT_MS must be between 1000 and 15000" >&2
   exit 1
 fi
+if [[ ! $API_REQUEST_TIMEOUT_MS =~ ^[0-9]+$ ]] || \
+   (( API_REQUEST_TIMEOUT_MS < 1000 || API_REQUEST_TIMEOUT_MS > 15000 )); then
+  echo "API_REQUEST_TIMEOUT_MS must be between 1000 and 15000" >&2
+  exit 1
+fi
 if [[ ! $DIGITALOCEAN_REQUEST_TIMEOUT_MS =~ ^[0-9]+$ ]] || \
    (( DIGITALOCEAN_REQUEST_TIMEOUT_MS < 1000 || DIGITALOCEAN_REQUEST_TIMEOUT_MS > 15000 )); then
   echo "DIGITALOCEAN_REQUEST_TIMEOUT_MS must be between 1000 and 15000" >&2
@@ -73,7 +79,7 @@ if [[ ! $DIGITALOCEAN_METRIC_WINDOW_SECONDS =~ ^[0-9]+$ ]] || \
   echo "DIGITALOCEAN_METRIC_WINDOW_SECONDS must be between 600 and 86400" >&2
   exit 1
 fi
-if ! node -e 'const issuer=new URL(process.env.SSO_ISSUER); const jwks=new URL(process.env.SSO_JWKS_URL); const hub=new URL(process.env.HUB_ORIGIN); const resource=new URL(process.env.SSO_RESOURCE); if(jwks.origin!==issuer.origin||resource.origin!==hub.origin) process.exit(1)'; then
+if ! node -e 'const issuer=new URL(process.env.SSO_ISSUER); const jwks=new URL(process.env.SSO_JWKS_URL); const hub=new URL(process.env.HUB_ORIGIN); const resource=new URL(process.env.SSO_RESOURCE); const api=new URL(process.env.API_ORIGIN); if(jwks.origin!==issuer.origin||resource.origin!==hub.origin||api.pathname!=="/"||api.search||api.hash||api.username||api.password) process.exit(1)'; then
   echo "Hub SSO issuer, JWKS, resource, and origin do not match" >&2
   exit 1
 fi
