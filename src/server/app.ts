@@ -195,7 +195,7 @@ export async function buildApp(options: {
   app.get("/health", async () => ({
     status: "ok",
     service: "LH-Hub",
-    version: "0.6.0",
+    version: "0.6.1",
   }));
 
   app.get("/api/v1/session", async (request, reply) => {
