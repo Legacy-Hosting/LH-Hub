@@ -31,8 +31,8 @@ body { min-width: 320px; }
 .auth-protection { justify-self: center; display: flex; align-items: center; gap: 8px; color: #777b89; font-size: 11px; }
 .auth-protection svg { color: #47d79a; }
 @keyframes auth-pulse { to { opacity: .35; transform: scale(.75); } }
-.shell { height: 100vh; overflow: hidden; display: grid; grid-template-columns: 244px minmax(0, 1fr); background: #0b0c10; }
-aside { position: sticky; top: 0; height: 100vh; padding: 25px 14px 18px; border-right: 1px solid #202129; background: #101116; display: flex; flex-direction: column; }
+.shell { position: fixed; inset: 0; width: 100%; height: auto; min-height: 0; overflow: hidden; display: grid; grid-template-columns: 244px minmax(0, 1fr); background: #0b0c10; }
+aside { height: 100%; min-height: 0; overflow: hidden; padding: 25px 14px 18px; border-right: 1px solid #202129; background: #101116; display: flex; flex-direction: column; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 10px 32px; }
 .brand > img { width: 31px; height: 31px; border-radius: 9px; object-fit: cover; }
 .brand strong, .brand small { display: block; }
@@ -50,7 +50,7 @@ nav a.active { background: #20212b; color: #fff; }
 .avatar { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 50%; background: #e2c1a8; color: #402b22; display: grid; place-items: center; font-size: 10px; font-weight: 700; }
 .profile-action { width: 30px; height: 30px; padding: 0; border: 0; border-radius: 7px; color: var(--muted); background: transparent; display: grid; place-items: center; cursor: pointer; }
 .profile-action:hover { color: #fff; background: #252630; }
-main { min-width: 0; min-height: 0; height: 100vh; overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+main { min-width: 0; min-height: 0; height: 100%; overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
 header { padding: 29px clamp(24px, 4vw, 58px) 23px; border-bottom: 1px solid #1e2027; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 header span, .section-title span, .notice span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .11em; }
 h1, h2, h3, p { margin: 0; }
@@ -60,7 +60,7 @@ h1 { font-size: clamp(22px, 2.3vw, 30px); margin-top: 6px; }
 .health i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #d19a43; margin-right: 7px; }
 .health.online i { background: #42d58c; }
 .health.unavailable i { background: #ef6170; }
-.content { min-height: 0; overflow-y: auto; padding: clamp(28px, 5vw, 70px) clamp(24px, 4vw, 58px); }
+.content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: clamp(28px, 5vw, 70px) clamp(24px, 4vw, 58px); }
 .notice { max-width: 1100px; border: 1px solid #322d50; border-radius: 15px; background: linear-gradient(115deg, #1c1930, #14151d); padding: 27px; display: flex; gap: 18px; align-items: flex-start; }
 .notice.authenticated { border-color: #234438; background: linear-gradient(115deg, #14251f, #14151d); }
 .notice.authenticated .notice-icon { background: #1b3a2f; color: #55dda3; }
@@ -290,11 +290,11 @@ footer a { color: #7561ff; text-decoration: none; }
 @media (max-width: 720px) {
   .auth-gate { padding: 20px; }
   .auth-card { padding: 30px 23px; }
-  .shell { height: 100vh; display: grid; grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .shell { display: grid; grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
   aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid #20222a; padding: 15px; }
   .brand { padding: 0; }
   .sidebar-profile, nav { display: none; }
-  main { height: auto; grid-row: 2; }
+  main { height: 100%; min-height: 0; grid-row: 2; }
   header { padding: 20px; }
   .health { font-size: 0; padding: 10px; }
   .health i { margin: 0; }

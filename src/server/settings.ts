@@ -385,9 +385,11 @@ function inferredStatusComponent(server: string, region: string) {
   const known = knownStatusComponents[server.toLowerCase()];
   if (known) return { server, ...known };
   const parts = server.toLowerCase().split("-").filter(Boolean);
-  const datacenterCode = parts[0] ?? region;
-  const number = parts.at(-1) ?? "01";
-  const serviceCode = parts.slice(1, -1).join("-") || "server";
+  const structured = parts.length >= 3;
+  const datacenterCode = structured ? parts[0]! : region;
+  const numberCandidate = structured ? parts.at(-1)! : "01";
+  const number = /^[a-z0-9-]{1,12}$/i.test(numberCandidate) ? numberCandidate : "01";
+  const serviceCode = structured ? parts.slice(1, -1).join("-") : parts.join("-") || "server";
   const service = displayWord(serviceCode);
   return {
     server,
@@ -416,9 +418,10 @@ function configuredStatusComponents(settings: StoredSettings) {
 }
 
 function directHostname(server: string) {
-  const [datacenter, ...remaining] = server.toLowerCase().split("-").filter(Boolean);
-  if (!datacenter || remaining.length === 0) throw new Error("invalid_status_server_name");
-  return `${datacenter}.${remaining.join("-")}.legacyh.fyi`;
+  const parts = server.toLowerCase().split("-").filter(Boolean);
+  if (parts.length >= 2) return `${parts[0]}.${parts.slice(1).join("-")}.legacyh.fyi`;
+  const fallback = server.toLowerCase().replaceAll(/[^a-z0-9-]+/g, "-").replaceAll(/^-+|-+$/g, "") || "server";
+  return `${fallback}.legacyh.fyi`;
 }
 
 function validatedPublicUrl(value: string) {

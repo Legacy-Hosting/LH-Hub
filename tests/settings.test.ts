@@ -78,9 +78,12 @@ test("Status services preserve main ordering and expose direct origin FQDNs", as
       { name: "ams3-api-01", region: "ams3" },
       { name: "ams3-panel-01", region: "ams3" },
       { name: "ams3-web-02", region: "ams3" },
+      { name: "database", region: "ams3" },
     ];
-    const defaults = await service.statusComponentAdminView(servers) as { components: Array<{ server: string; visible: boolean }> };
+    const defaults = await service.statusComponentAdminView(servers) as { components: Array<{ server: string; visible: boolean; originFqdn: string; number: string }> };
     assert.equal(defaults.components.find((component) => component.server === "ams3-api-01")?.visible, true);
+    assert.equal(defaults.components.find((component) => component.server === "database")?.originFqdn, "database.legacyh.fyi");
+    assert.equal(defaults.components.find((component) => component.server === "database")?.number, "01");
 
     await service.saveStatusComponents([
       {
