@@ -30,6 +30,8 @@ const schema = z
     HUB_ORIGIN: z.string().url().default("http://localhost:5174"),
     HUB_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(28_800).default(28_800),
     API_ORIGIN: z.string().url().default("http://localhost:8080"),
+    HUB_API_SERVICE_TOKEN: z.string().min(32).optional(),
+    HUB_DISCORD_SERVICE_TOKEN: z.string().min(32).optional(),
     API_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(15_000).default(5_000),
     STATUS_API_URL: z.string().url().default("https://status.legacyhosting.xyz/api/v1/status"),
     SERVICE_HEALTH_TARGETS: z.string().default(defaultTargets),
@@ -71,6 +73,8 @@ const schema = z
       "SSO_REDIRECT_URI",
       "SSO_RESOURCE",
       "HUB_SETTINGS_KEY",
+      "HUB_API_SERVICE_TOKEN",
+      "HUB_DISCORD_SERVICE_TOKEN",
     ] as const) {
       if (!value[field]) {
         context.addIssue({

@@ -30,3 +30,65 @@ test("Hub settings validate and encrypt DigitalOcean tokens at rest", async () =
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("Hub settings encrypt Discord credentials and manage routing and maintenance", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lh-hub-discord-settings-"));
+  const file = join(directory, "settings.enc.json");
+  const botToken = `discord.${"x".repeat(48)}`;
+  const guildId = "123456789012345678";
+  const channelId = "223456789012345678";
+  try {
+    const service = createHubSettingsService({
+      file,
+      encryptionKey: "b".repeat(64),
+      timeoutMs: 5_000,
+      fetchImplementation: async (_url, options) => {
+        assert.equal(new Headers(options?.headers).get("authorization"), `Bot ${botToken}`);
+        return Response.json({ id: guildId }, { status: 200 });
+      },
+    });
+    await service.saveDiscordCredentials({ botToken, guildId });
+    assert.equal((await readFile(file, "utf8")).includes(botToken), false);
+    await service.reportDiscordPresence({
+      bot: { id: "323456789012345678", username: "LH-Discord" },
+      channels: [{ id: channelId, name: "operations" }],
+    });
+    const admin = await service.discordAdminView() as {
+      tokenConfigured: boolean;
+      channels: Array<{ id: string }>;
+      services: Array<{ key: string; channelIds: string[] }>;
+      announcements: Array<{ key: "birthday" | "christmas" | "newyear"; title: string; message: string }>;
+    };
+    assert.equal(admin.tokenConfigured, true);
+    assert.equal(admin.channels[0]?.id, channelId);
+    await service.saveDiscordConfiguration({
+      serviceChannels: Object.fromEntries(admin.services.map((item) => [item.key, [channelId]])),
+      announcements: admin.announcements.map((item) => ({
+        ...item,
+        enabled: true,
+        channelIds: [channelId],
+      })),
+    });
+    await service.createMaintenance({
+      targetKey: "api",
+      title: "API maintenance",
+      message: "Deploying a database update.",
+      scheduledFor: "2026-12-01T10:00:00.000Z",
+      scheduledUntil: "2026-12-01T11:00:00.000Z",
+    });
+    const bot = await service.discordBotConfiguration() as {
+      botToken: string;
+      services: Array<{ key: string; channelIds: string[] }>;
+      maintenance: Array<{ id: string }>;
+    };
+    assert.equal(bot.botToken, botToken);
+    assert.deepEqual(bot.services.find((item) => item.key === "api")?.channelIds, [channelId]);
+    assert.equal(bot.maintenance.length, 1);
+    assert.equal(await service.finishMaintenance(bot.maintenance[0]!.id, "complete"), true);
+    const publicEvents = await service.publicStatusEvents() as Array<{ status: string; components: string[] }>;
+    assert.equal(publicEvents[0]?.status, "completed");
+    assert.deepEqual(publicEvents[0]?.components, ["api"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

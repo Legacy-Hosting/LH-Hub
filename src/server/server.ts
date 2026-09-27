@@ -62,10 +62,12 @@ const infrastructureReader = createConfigurableDigitalOceanInfrastructureReader(
 });
 const auditReader = createAuditReader({
   apiOrigin: env.API_ORIGIN,
+  ...(env.HUB_API_SERVICE_TOKEN ? { serviceToken: env.HUB_API_SERVICE_TOKEN } : {}),
   timeoutMs: env.API_REQUEST_TIMEOUT_MS,
 });
 const operationsReader = createOperationsReader({
   apiOrigin: env.API_ORIGIN,
+  ...(env.HUB_API_SERVICE_TOKEN ? { serviceToken: env.HUB_API_SERVICE_TOKEN } : {}),
   timeoutMs: env.API_REQUEST_TIMEOUT_MS,
 });
 const publicStatusReader = createPublicStatusReader({

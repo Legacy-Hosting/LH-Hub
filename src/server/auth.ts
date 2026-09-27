@@ -18,6 +18,8 @@ export const hubCapabilities = [
   "support:read",
   "sales:read",
   "audit:read",
+  "discord:manage",
+  "maintenance:write",
   "settings:write",
 ] as const;
 
@@ -29,7 +31,7 @@ const roleCapabilities: Record<StaffRole, readonly HubCapability[]> = {
   management: hubCapabilities.filter((capability) => capability !== "settings:write"),
   platform_admin: hubCapabilities,
   developer: ["services:read", "infrastructure:read", "operations:read"],
-  infrastructure: ["services:read", "infrastructure:read", "operations:read"],
+  infrastructure: ["services:read", "infrastructure:read", "operations:read", "maintenance:write"],
   support: ["services:read", "support:read", "audit:read"],
   sales: ["services:read", "sales:read"],
 };

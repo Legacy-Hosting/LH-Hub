@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import packageMetadata from "../../package.json";
 import {
   Activity,
+  Bot,
   ClipboardList,
   Cpu,
   Gauge,
@@ -19,17 +20,27 @@ import {
   ShoppingBag,
   Users,
 } from "lucide-react";
+import {
+  DiscordCredentialsCard,
+  DiscordWorkspace,
+  MaintenanceWorkspace,
+} from "./discord.jsx";
 import "./styles.css";
 
 const navigation = [
-  { key: "overview", capability: "services:read", icon: Gauge, label: "Overview" },
-  { key: "infrastructure", capability: "infrastructure:read", icon: Server, label: "Infrastructure" },
-  { key: "operations", capability: "operations:read", icon: Activity, label: "Operations" },
-  { key: "support", capability: "support:read", icon: Users, label: "Support" },
-  { key: "sales", capability: "sales:read", icon: ShoppingBag, label: "Sales" },
-  { key: "audit", capability: "audit:read", icon: ClipboardList, label: "Audit log" },
-  { key: "settings", capability: "settings:write", icon: Settings, label: "Settings" },
+  { key: "overview", path: "/", capability: "services:read", icon: Gauge, label: "Overview" },
+  { key: "infrastructure", path: "/infrastructure", capability: "infrastructure:read", icon: Server, label: "Infrastructure" },
+  { key: "operations", path: "/operations", capability: "operations:read", icon: Activity, label: "Operations" },
+  { key: "support", path: "/support", capability: "support:read", icon: Users, label: "Support" },
+  { key: "sales", path: "/sales", capability: "sales:read", icon: ShoppingBag, label: "Sales" },
+  { key: "audit", path: "/audit-log", capability: "audit:read", icon: ClipboardList, label: "Audit log" },
+  { key: "discord", path: "/discord", capability: "discord:manage", icon: Bot, label: "Discord" },
+  { key: "settings", path: "/settings", capability: "settings:write", icon: Settings, label: "Settings" },
 ];
+
+function sectionFromLocation() {
+  return navigation.find((item) => item.path === window.location.pathname)?.key ?? "overview";
+}
 
 const roleLabels = {
   founder: "Founder",
@@ -99,7 +110,7 @@ function AuthGate({ state, authError }) {
   const unavailable = state === "unavailable";
   return (
     <main className="auth-gate">
-      <div className="auth-brand"><span>L</span><div><strong>Legacy Hosting</strong><small>Staff Hub</small></div></div>
+      <div className="auth-brand"><img src="https://legacyhosting.xyz/assets/icons/LegacyHostingLogo.png" alt="" /><div><strong>Legacy Hosting</strong><small>Staff Hub</small></div></div>
       <section className="auth-card" aria-live="polite">
         <div className="auth-icon"><LockKeyhole size={27} /></div>
         <span>Restricted workspace</span>
@@ -112,7 +123,7 @@ function AuthGate({ state, authError }) {
               : "Continue with Legacy Hosting SSO to access this internal service."}
         </p>
         {!checking && (
-          <a className="primary auth-button" href="/auth/login?return_to=%2F">
+          <a className="primary auth-button" href={`/auth/login?return_to=${encodeURIComponent(window.location.pathname)}`}>
             <LogIn size={17} />Sign in with SSO
           </a>
         )}
@@ -156,12 +167,18 @@ function App() {
     events: [],
     nextCursor: null,
   });
-  const [activeSection, setActiveSection] = useState("overview");
+  const [activeSection, setActiveSection] = useState(sectionFromLocation);
   const [showLogout, setShowLogout] = useState(false);
   const [digitalOceanSettings, setDigitalOceanSettings] = useState({ configured: false, source: "none" });
   const [digitalOceanToken, setDigitalOceanToken] = useState("");
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState("");
+  const [discordConfiguration, setDiscordConfiguration] = useState(null);
+  const [discordBusy, setDiscordBusy] = useState(false);
+  const [discordMessage, setDiscordMessage] = useState("");
+  const [maintenanceData, setMaintenanceData] = useState(null);
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
+  const [maintenanceMessage, setMaintenanceMessage] = useState("");
   const authError = new URLSearchParams(window.location.search).has("auth_error");
 
   useEffect(() => {
@@ -181,7 +198,9 @@ function App() {
       const canViewOperations = capabilities.includes("operations:read");
       const canViewAudit = capabilities.includes("audit:read");
       const canWriteSettings = capabilities.includes("settings:write");
-      const [overviewResult, infrastructureResult, operationsResult, auditResult, settingsResult] = await Promise.allSettled([
+      const canManageDiscord = capabilities.includes("discord:manage");
+      const canWriteMaintenance = capabilities.includes("maintenance:write");
+      const [overviewResult, infrastructureResult, operationsResult, auditResult, settingsResult, discordResult, maintenanceResult] = await Promise.allSettled([
         jsonResponse("/api/v1/overview"),
         canViewInfrastructure
           ? jsonResponse("/api/v1/infrastructure")
@@ -194,6 +213,12 @@ function App() {
           : Promise.resolve(null),
         canWriteSettings
           ? jsonResponse("/api/v1/settings/digitalocean")
+          : Promise.resolve(null),
+        canManageDiscord
+          ? jsonResponse("/api/v1/discord")
+          : Promise.resolve(null),
+        canWriteMaintenance
+          ? jsonResponse("/api/v1/maintenance")
           : Promise.resolve(null),
       ]);
       if (active) {
@@ -232,6 +257,12 @@ function App() {
         }
         if (canWriteSettings && settingsResult.status === "fulfilled" && settingsResult.value) {
           setDigitalOceanSettings(settingsResult.value);
+        }
+        if (canManageDiscord && discordResult.status === "fulfilled" && discordResult.value) {
+          setDiscordConfiguration(discordResult.value);
+        }
+        if (canWriteMaintenance && maintenanceResult.status === "fulfilled" && maintenanceResult.value) {
+          setMaintenanceData(maintenanceResult.value);
         }
       }
       refreshing = false;
@@ -275,6 +306,12 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const onPopState = () => setActiveSection(sectionFromLocation());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   const clock = useMemo(
     () => new Intl.DateTimeFormat(undefined, {
       dateStyle: "medium",
@@ -288,6 +325,7 @@ function App() {
   const canViewInfrastructure = auth.capabilities.includes("infrastructure:read");
   const canViewOperations = auth.capabilities.includes("operations:read");
   const canViewAudit = auth.capabilities.includes("audit:read");
+  const canWriteMaintenance = auth.capabilities.includes("maintenance:write");
   const visibleNavigation = navigation.filter((item) => auth.capabilities.includes(item.capability));
   const activeNavigation = visibleNavigation.find((item) => item.key === activeSection)
     ?? visibleNavigation[0]
@@ -356,6 +394,101 @@ function App() {
     }
   }
 
+  function navigate(section) {
+    const destination = navigation.find((item) => item.key === section) ?? navigation[0];
+    if (window.location.pathname !== destination.path) {
+      window.history.pushState({}, "", destination.path);
+    }
+    setActiveSection(destination.key);
+  }
+
+  async function saveDiscordCredentials(credentials) {
+    setDiscordBusy(true);
+    setDiscordMessage("");
+    try {
+      const response = await fetch("/api/v1/settings/discord", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(credentials),
+      });
+      if (!response.ok) throw new Error("Discord rejected the bot token or the bot cannot access that server.");
+      const next = await response.json();
+      setDiscordConfiguration(next);
+      setDiscordMessage("Discord bot credentials were verified and saved.");
+    } catch (error) {
+      setDiscordMessage(error instanceof Error ? error.message : "Discord settings could not be saved.");
+      throw error;
+    } finally {
+      setDiscordBusy(false);
+    }
+  }
+
+  async function saveDiscordConfiguration() {
+    if (!discordConfiguration) return;
+    setDiscordBusy(true);
+    setDiscordMessage("");
+    try {
+      const response = await fetch("/api/v1/discord", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          serviceChannels: Object.fromEntries(discordConfiguration.services.map((service) => [service.key, service.channelIds])),
+          announcements: discordConfiguration.announcements.map(({ key, enabled, title, message, channelIds }) => ({ key, enabled, title, message, channelIds })),
+        }),
+      });
+      if (!response.ok) throw new Error("The Discord configuration could not be saved.");
+      setDiscordConfiguration(await response.json());
+      setDiscordMessage("Discord channels and announcements were saved.");
+    } catch (error) {
+      setDiscordMessage(error instanceof Error ? error.message : "The Discord configuration could not be saved.");
+    } finally {
+      setDiscordBusy(false);
+    }
+  }
+
+  async function createMaintenance(input) {
+    setMaintenanceBusy(true);
+    setMaintenanceMessage("");
+    try {
+      const response = await fetch("/api/v1/maintenance", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(input),
+      });
+      if (!response.ok) throw new Error("Maintenance could not be scheduled. Check the time window.");
+      setMaintenanceData(await response.json());
+      setMaintenanceMessage("Maintenance was scheduled and will be published automatically.");
+    } catch (error) {
+      setMaintenanceMessage(error instanceof Error ? error.message : "Maintenance could not be scheduled.");
+      throw error;
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  }
+
+  async function finishMaintenance(id, action) {
+    setMaintenanceBusy(true);
+    setMaintenanceMessage("");
+    try {
+      const response = await fetch(`/api/v1/maintenance/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!response.ok) throw new Error("Maintenance could not be updated.");
+      setMaintenanceData(await response.json());
+      setMaintenanceMessage(action === "complete" ? "Maintenance marked complete." : "Maintenance cancelled.");
+    } catch (error) {
+      setMaintenanceMessage(error instanceof Error ? error.message : "Maintenance could not be updated.");
+    } finally {
+      setMaintenanceBusy(false);
+    }
+  }
+
   if (!authenticated) {
     return <AuthGate state={auth.state} authError={authError} />;
   }
@@ -363,18 +496,21 @@ function App() {
   return (
     <div className="shell">
       <aside>
-        <div className="brand"><span>L</span><div><strong>Legacy Hosting</strong><small>Staff Hub</small></div></div>
+        <div className="brand"><img src="https://legacyhosting.xyz/assets/icons/LegacyHostingLogo.png" alt="" /><div><strong>Legacy Hosting</strong><small>Staff Hub</small></div></div>
         <nav aria-label="Hub navigation">
-          {visibleNavigation.map(({ key, icon: Icon, label }) => (
-            <button
+          {visibleNavigation.map(({ key, path, icon: Icon, label }) => (
+            <a
               className={activeNavigation.key === key ? "active" : undefined}
               key={key}
-              type="button"
+              href={path}
               aria-current={activeNavigation.key === key ? "page" : undefined}
-              onClick={() => setActiveSection(key)}
+              onClick={(event) => {
+                event.preventDefault();
+                navigate(key);
+              }}
             >
               <Icon size={18} />{label}
-            </button>
+            </a>
           ))}
         </nav>
         <div className="sidebar-profile">
@@ -473,6 +609,15 @@ function App() {
                   )}
                 </div>
               </div>
+              {canWriteMaintenance && (
+                <MaintenanceWorkspace
+                  data={maintenanceData}
+                  busy={maintenanceBusy}
+                  message={maintenanceMessage}
+                  onCreate={createMaintenance}
+                  onFinish={finishMaintenance}
+                />
+              )}
             </>
           )}
 
@@ -558,6 +703,17 @@ function App() {
             </>
           )}
 
+          {activeNavigation.key === "discord" && (
+            <DiscordWorkspace
+              configuration={discordConfiguration}
+              onChange={setDiscordConfiguration}
+              onSave={saveDiscordConfiguration}
+              busy={discordBusy}
+              message={discordMessage}
+              navigate={navigate}
+            />
+          )}
+
           {activeNavigation.key === "settings" && (
             <div className="settings-workspace">
               <div className="section-title settings-title">
@@ -600,6 +756,16 @@ function App() {
                   </button>
                 </div>
               </form>
+              <div className="section-title settings-subtitle">
+                <div><span>Messaging</span><h2>Discord bot</h2></div>
+                <p>Credentials stay encrypted and are never returned to the browser.</p>
+              </div>
+              <DiscordCredentialsCard
+                configuration={discordConfiguration}
+                busy={discordBusy}
+                message={discordMessage}
+                onSave={saveDiscordCredentials}
+              />
             </div>
           )}
         </section>

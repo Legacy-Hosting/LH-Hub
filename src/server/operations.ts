@@ -103,6 +103,7 @@ export type PublicStatusReader = () => Promise<PublicStatusSnapshot>;
 
 export function createOperationsReader(options: {
   apiOrigin: string;
+  serviceToken?: string;
   timeoutMs: number;
   fetchImplementation?: FetchImplementation;
 }): OperationsReader {
@@ -113,7 +114,9 @@ export function createOperationsReader(options: {
       method: "GET",
       headers: {
         accept: "application/json",
-        authorization: `Bearer ${accessToken}`,
+        ...(options.serviceToken
+          ? { "x-lh-hub-token": options.serviceToken }
+          : { authorization: `Bearer ${accessToken}` }),
       },
       redirect: "error",
       signal: AbortSignal.timeout(options.timeoutMs),

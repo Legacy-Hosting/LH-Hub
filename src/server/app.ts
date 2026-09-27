@@ -2,6 +2,7 @@ import helmet from "@fastify/helmet";
 import formbody from "@fastify/formbody";
 import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import {
   authorizeClaims,
@@ -36,6 +37,7 @@ export async function buildApp(options: {
   operationsReader?: OperationsReader;
   publicStatusReader?: PublicStatusReader;
   settings?: HubSettingsService;
+  discordServiceToken?: string;
 } = {}) {
   const app = Fastify({
     logger: env.NODE_ENV === "production",
@@ -85,6 +87,18 @@ export async function buildApp(options: {
       "SameSite=Lax",
       ...(secureCookies ? ["Secure"] : []),
     ].join("; ");
+  }
+
+  function validDiscordServiceToken(value: string | string[] | undefined) {
+    const configured = options.discordServiceToken ?? env.HUB_DISCORD_SERVICE_TOKEN;
+    if (!configured || typeof value !== "string") return false;
+    const supplied = Buffer.from(value);
+    const expected = Buffer.from(configured);
+    return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  }
+
+  function validBrowserOrigin(origin: string | undefined) {
+    return origin === new URL(hubOrigin).origin;
   }
 
   type AuthorizationResult =
@@ -312,6 +326,181 @@ export async function buildApp(options: {
     if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
     await options.settings.clearDigitalOceanToken();
     return options.settings.digitalOceanStatus();
+  });
+
+  app.get("/api/v1/settings/discord", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "settings:write")) {
+      return reply.status(403).send({ error: "platform_admin_required" });
+    }
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    return options.settings.discordAdminView();
+  });
+
+  app.put("/api/v1/settings/discord", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "settings:write")) {
+      return reply.status(403).send({ error: "platform_admin_required" });
+    }
+    if (!validBrowserOrigin(request.headers.origin)) return reply.status(403).send({ error: "invalid_origin" });
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    const body = z.object({
+      guildId: z.string().regex(/^\d{17,20}$/),
+      botToken: z.string().min(20).max(512).optional(),
+    }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_discord_credentials" });
+    try {
+      await options.settings.saveDiscordCredentials({
+        guildId: body.data.guildId,
+        ...(body.data.botToken ? { botToken: body.data.botToken } : {}),
+      });
+      return options.settings.discordAdminView();
+    } catch {
+      request.log.warn("Discord bot credentials were rejected");
+      return reply.status(400).send({ error: "discord_credentials_rejected" });
+    }
+  });
+
+  app.get("/api/v1/discord", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "discord:manage")) {
+      return reply.status(403).send({ error: "discord_management_required" });
+    }
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    return options.settings.discordAdminView();
+  });
+
+  app.put("/api/v1/discord", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "discord:manage")) {
+      return reply.status(403).send({ error: "discord_management_required" });
+    }
+    if (!validBrowserOrigin(request.headers.origin)) return reply.status(403).send({ error: "invalid_origin" });
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    const channelIds = z.array(z.string().regex(/^\d{17,20}$/)).max(20);
+    const body = z.object({
+      serviceChannels: z.record(z.string(), channelIds),
+      announcements: z.array(z.object({
+        key: z.enum(["birthday", "christmas", "newyear"]),
+        enabled: z.boolean(),
+        title: z.string().trim().min(1).max(256),
+        message: z.string().trim().min(1).max(2_000),
+        channelIds,
+      })).length(3),
+    }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_discord_configuration" });
+    try {
+      await options.settings.saveDiscordConfiguration(body.data);
+      return options.settings.discordAdminView();
+    } catch {
+      return reply.status(400).send({ error: "invalid_discord_configuration" });
+    }
+  });
+
+  app.post("/api/v1/maintenance", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "maintenance:write")) {
+      return reply.status(403).send({ error: "maintenance_access_required" });
+    }
+    if (!validBrowserOrigin(request.headers.origin)) return reply.status(403).send({ error: "invalid_origin" });
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    const body = z.object({
+      targetKey: z.enum(["api", "sso", "hub", "panel", "status"]),
+      title: z.string().trim().min(3).max(120),
+      message: z.string().trim().min(3).max(1_000),
+      scheduledFor: z.string().datetime(),
+      scheduledUntil: z.string().datetime(),
+    }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_maintenance" });
+    try {
+      await options.settings.createMaintenance(body.data);
+      return reply.status(201).send(await options.settings.maintenanceView());
+    } catch {
+      return reply.status(400).send({ error: "invalid_maintenance" });
+    }
+  });
+
+  app.patch("/api/v1/maintenance/:id", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "maintenance:write")) {
+      return reply.status(403).send({ error: "maintenance_access_required" });
+    }
+    if (!validBrowserOrigin(request.headers.origin)) return reply.status(403).send({ error: "invalid_origin" });
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    const parameters = z.object({ id: z.string().regex(/^maintenance-[a-f0-9]{24}$/) }).safeParse(request.params);
+    const body = z.object({ action: z.enum(["complete", "cancel"]) }).safeParse(request.body);
+    if (!parameters.success || !body.success) return reply.status(400).send({ error: "invalid_maintenance" });
+    if (!await options.settings.finishMaintenance(parameters.data.id, body.data.action)) {
+      return reply.status(404).send({ error: "maintenance_not_found" });
+    }
+    return options.settings.maintenanceView();
+  });
+
+  app.get("/api/v1/maintenance", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "maintenance:write")) {
+      return reply.status(403).send({ error: "maintenance_access_required" });
+    }
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    return options.settings.maintenanceView();
+  });
+
+  app.get("/api/v1/public/status-events", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=15, stale-if-error=300");
+    return options.settings ? options.settings.publicStatusEvents() : [];
+  });
+
+  app.get("/api/v1/internal/discord/config", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!validDiscordServiceToken(request.headers.authorization?.replace(/^Bearer\s+/i, ""))) {
+      return reply.status(401).send({ error: "invalid_service_token" });
+    }
+    const configuration = await options.settings?.discordBotConfiguration();
+    return configuration ?? reply.status(503).send({ error: "discord_not_configured" });
+  });
+
+  app.put("/api/v1/internal/discord/presence", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!validDiscordServiceToken(request.headers.authorization?.replace(/^Bearer\s+/i, ""))) {
+      return reply.status(401).send({ error: "invalid_service_token" });
+    }
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    const body = z.object({
+      bot: z.object({ id: z.string().regex(/^\d{17,20}$/), username: z.string().min(1).max(100) }),
+      channels: z.array(z.object({ id: z.string().regex(/^\d{17,20}$/), name: z.string().min(1).max(100) })).max(500),
+    }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_discord_presence" });
+    await options.settings.reportDiscordPresence(body.data);
+    return reply.status(204).send();
+  });
+
+  app.post("/api/v1/internal/discord/announcement-sent", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!validDiscordServiceToken(request.headers.authorization?.replace(/^Bearer\s+/i, ""))) {
+      return reply.status(401).send({ error: "invalid_service_token" });
+    }
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    const body = z.object({
+      key: z.enum(["birthday", "christmas", "newyear"]),
+      year: z.number().int().min(2017).max(9999),
+    }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_announcement_receipt" });
+    await options.settings.recordAnnouncementSent(body.data.key, body.data.year);
+    return reply.status(204).send();
   });
 
   app.get("/api/v1/operations", async (request, reply) => {

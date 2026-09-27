@@ -35,6 +35,7 @@ export type AuditReader = (input: {
 
 export function createAuditReader(options: {
   apiOrigin: string;
+  serviceToken?: string;
   timeoutMs: number;
   fetchImplementation?: FetchImplementation;
 }): AuditReader {
@@ -48,7 +49,9 @@ export function createAuditReader(options: {
       method: "GET",
       headers: {
         accept: "application/json",
-        authorization: `Bearer ${input.accessToken}`,
+        ...(options.serviceToken
+          ? { "x-lh-hub-token": options.serviceToken }
+          : { authorization: `Bearer ${input.accessToken}` }),
       },
       redirect: "error",
       signal: AbortSignal.timeout(options.timeoutMs),

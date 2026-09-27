@@ -47,6 +47,7 @@ before(async () => {
       return { subject: "user-1", eventId: "logout-event-123456789" };
     },
     hubOrigin: "https://hub.legacyhosting.xyz",
+    discordServiceToken: "d".repeat(32),
     secureCookies: true,
     fetchImplementation: async () => new Response("ok", { status: 200 }),
     infrastructureReader: async () => ({
@@ -119,6 +120,24 @@ before(async () => {
       clearDigitalOceanToken: async () => {
         storedDigitalOceanToken = undefined;
       },
+      discordAdminView: async () => ({ configured: false, services: [], announcements: [], maintenance: [] }),
+      maintenanceView: async () => ({ services: [], maintenance: [] }),
+      saveDiscordCredentials: async () => undefined,
+      saveDiscordConfiguration: async () => undefined,
+      createMaintenance: async () => undefined,
+      finishMaintenance: async () => true,
+      publicStatusEvents: async () => [],
+      discordBotConfiguration: async () => ({
+        configured: true,
+        botToken: "bot-token-value-for-testing",
+        guildId: "123456789012345678",
+        services: [],
+        announcements: [],
+        maintenance: [],
+        assets: {},
+      }),
+      reportDiscordPresence: async () => undefined,
+      recordAnnouncementSent: async () => undefined,
     },
   });
 });
@@ -133,7 +152,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-      version: "0.6.6",
+      version: "0.7.0",
   });
 });
 
@@ -316,4 +335,18 @@ test("operations combine the protected API summary and public status snapshot", 
     headers: { authorization: "Bearer staff-token" },
   });
   assert.equal(denied.statusCode, 403);
+});
+
+test("LH-Discord configuration is available only to the internal bot service", async () => {
+  const missing = await app.inject({ method: "GET", url: "/api/v1/internal/discord/config" });
+  assert.equal(missing.statusCode, 401);
+
+  const allowed = await app.inject({
+    method: "GET",
+    url: "/api/v1/internal/discord/config",
+    headers: { authorization: `Bearer ${"d".repeat(32)}` },
+  });
+  assert.equal(allowed.statusCode, 200);
+  assert.equal(allowed.json().guildId, "123456789012345678");
+  assert.equal(allowed.json().botToken, "bot-token-value-for-testing");
 });
