@@ -20,13 +20,6 @@ import {
 } from "lucide-react";
 import "./styles.css";
 
-const staffAreas = [
-  { icon: Server, title: "Infrastructure", text: "Server and service health across regions." },
-  { icon: Activity, title: "Operations", text: "Incidents, deployments, backups, and alerts." },
-  { icon: Users, title: "Customer support", text: "Audited support context through LH-API." },
-  { icon: Gauge, title: "Capacity", text: "Resource trends without exposing provider tokens." },
-];
-
 const navigation = [
   { capability: "services:read", icon: Gauge, label: "Overview", active: true },
   { capability: "infrastructure:read", icon: Server, label: "Infrastructure" },
@@ -57,6 +50,35 @@ function infrastructureLabel(state) {
 
 function auditAction(action) {
   return action.replaceAll(".", " · ").replaceAll("_", " ");
+}
+
+function AuthGate({ state, authError }) {
+  const checking = state === "checking";
+  const unavailable = state === "unavailable";
+  return (
+    <main className="auth-gate">
+      <div className="auth-brand"><span>L</span><div><strong>Legacy Hosting</strong><small>Staff Hub</small></div></div>
+      <section className="auth-card" aria-live="polite">
+        <div className="auth-icon"><LockKeyhole size={27} /></div>
+        <span>Restricted workspace</span>
+        <h1>{checking ? "Checking your staff session" : "Sign in to Staff Hub"}</h1>
+        <p>
+          {authError
+            ? "The previous sign-in could not be completed. Try again or contact an administrator."
+            : unavailable
+              ? "The authentication service is temporarily unavailable. Please try again."
+              : "Continue with Legacy Hosting SSO to access this internal service."}
+        </p>
+        {!checking && (
+          <a className="primary auth-button" href="/auth/login?return_to=%2F">
+            <LogIn size={17} />Sign in with SSO
+          </a>
+        )}
+        {checking && <div className="auth-progress"><i />Verifying session</div>}
+      </section>
+      <div className="auth-protection"><ShieldCheck size={16} />Protected by LH-SSO</div>
+    </main>
+  );
 }
 
 async function jsonResponse(url) {
@@ -210,9 +232,7 @@ function App() {
   const canViewInfrastructure = auth.capabilities.includes("infrastructure:read");
   const canViewOperations = auth.capabilities.includes("operations:read");
   const canViewAudit = auth.capabilities.includes("audit:read");
-  const visibleNavigation = authenticated
-    ? navigation.filter((item) => auth.capabilities.includes(item.capability))
-    : navigation.slice(0, 1);
+  const visibleNavigation = navigation.filter((item) => auth.capabilities.includes(item.capability));
 
   async function loadMoreAudit() {
     if (!audit.nextCursor || audit.state === "loading-more") return;
@@ -229,6 +249,10 @@ function App() {
     } catch {
       setAudit((current) => ({ ...current, state: "unavailable" }));
     }
+  }
+
+  if (!authenticated) {
+    return <AuthGate state={auth.state} authError={authError} />;
   }
 
   return (
@@ -250,23 +274,15 @@ function App() {
           <div className={`health ${health}`}><i />Hub {health}</div>
         </header>
         <section className="content">
-          {authenticated ? (
-            <div className="notice authenticated">
-              <div className="notice-icon"><ShieldCheck size={25} /></div>
-              <div className="notice-copy"><span>Authenticated by LH-SSO</span><h2>Staff access active</h2><p>{auth.user.email || auth.user.name || auth.user.sub}</p><div className="roles">{auth.user.roles.map((role) => <b key={role}>{role.replaceAll("_", " ")}</b>)}</div></div>
-              <form action="/auth/logout" method="post"><button className="secondary" type="submit"><LogOut size={16} />Sign out</button></form>
-            </div>
-          ) : (
-            <div className="notice">
-              <div className="notice-icon"><LockKeyhole size={25} /></div>
-              <div className="notice-copy"><span>Restricted workspace</span><h2>{auth.state === "checking" ? "Checking your staff session" : "Sign in with Legacy Hosting SSO"}</h2><p>{authError ? "The previous sign-in could not be completed. Try again or contact an administrator." : "Only authorized Legacy Hosting staff roles can access operational data."}</p></div>
-              {auth.state !== "checking" && <a className="primary" href="/auth/login?return_to=%2F"><LogIn size={16} />Sign in</a>}
-            </div>
-          )}
+          <div className="notice authenticated">
+            <div className="notice-icon"><ShieldCheck size={25} /></div>
+            <div className="notice-copy"><span>Authenticated by LH-SSO</span><h2>Staff access active</h2><p>{auth.user.email || auth.user.name || auth.user.sub}</p><div className="roles">{auth.user.roles.map((role) => <b key={role}>{role.replaceAll("_", " ")}</b>)}</div></div>
+            <form action="/auth/logout" method="post"><button className="secondary" type="submit"><LogOut size={16} />Sign out</button></form>
+          </div>
 
-          <div className="section-title"><div><span>{authenticated ? "Live checks" : "Protected areas"}</span><h2>{authenticated ? "Service overview" : "One operational view"}</h2></div><p>No provider credential is ever sent to the browser.</p></div>
+          <div className="section-title"><div><span>Live checks</span><h2>Service overview</h2></div><p>No provider credential is ever sent to the browser.</p></div>
           <div className="grid">
-            {(authenticated && services.length > 0 ? services : staffAreas).map((item) => {
+            {services.map((item) => {
               const Icon = item.icon || Activity;
               return (
                 <article key={item.key || item.title}>
