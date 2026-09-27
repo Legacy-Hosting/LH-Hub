@@ -19,7 +19,7 @@ set +a
 required=(NODE_ENV HOST PORT SSO_ISSUER SSO_AUDIENCE SSO_JWKS_URL SSO_CLIENT_ID \
   SSO_CLIENT_SECRET SSO_REDIRECT_URI SSO_RESOURCE SSO_REQUEST_TIMEOUT_MS HUB_ORIGIN HUB_SESSION_TTL_SECONDS \
   API_ORIGIN API_REQUEST_TIMEOUT_MS STATUS_API_URL \
-  SERVICE_HEALTH_TARGETS DIGITALOCEAN_TOKEN DIGITALOCEAN_REQUEST_TIMEOUT_MS \
+  SERVICE_HEALTH_TARGETS DIGITALOCEAN_REQUEST_TIMEOUT_MS \
   DIGITALOCEAN_CACHE_TTL_MS DIGITALOCEAN_METRIC_WINDOW_SECONDS)
 for name in "${required[@]}"; do
   if [[ -z ${!name:-} ]]; then
@@ -42,8 +42,9 @@ if [[ ${#SSO_CLIENT_SECRET} -lt 32 ]]; then
   echo "SSO_CLIENT_SECRET must contain at least 32 characters" >&2
   exit 1
 fi
-if [[ ${#DIGITALOCEAN_TOKEN} -lt 32 || $DIGITALOCEAN_TOKEN == *replace-with* ]]; then
-  echo "DIGITALOCEAN_TOKEN must be a real scoped read-only token" >&2
+if [[ -n ${DIGITALOCEAN_TOKEN:-} ]] && \
+   { [[ ${#DIGITALOCEAN_TOKEN} -lt 32 ]] || [[ $DIGITALOCEAN_TOKEN == *replace-with* ]]; }; then
+  echo "DIGITALOCEAN_TOKEN must be empty or a real scoped read-only token" >&2
   exit 1
 fi
 if [[ $SSO_REDIRECT_URI != "${HUB_ORIGIN%/}/auth/callback" ]]; then

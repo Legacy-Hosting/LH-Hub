@@ -68,7 +68,6 @@ const schema = z
       "SSO_CLIENT_SECRET",
       "SSO_REDIRECT_URI",
       "SSO_RESOURCE",
-      "DIGITALOCEAN_TOKEN",
     ] as const) {
       if (!value[field]) {
         context.addIssue({

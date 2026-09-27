@@ -1,23 +1,25 @@
+@import url("/fonts/fonts.css");
+
 :root {
-  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #eef0f8;
-  background: #0a0b0f;
+  font-family: "DM Sans", sans-serif;
+  color: #e9eaf2;
+  background: #0b0c10;
   font-synthesis: none;
-  --border: #252730;
-  --muted: #8c8f9e;
-  --surface: #13151b;
+  --border: #25262f;
+  --muted: #858795;
+  --surface: #131419;
   --purple: #7561ff;
 }
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; width: 100%; min-height: 100%; }
 button { font: inherit; }
 body { min-width: 320px; }
-.shell { min-height: 100vh; display: grid; grid-template-columns: 238px minmax(0, 1fr); }
-aside { position: sticky; top: 0; height: 100vh; padding: 25px 14px 18px; border-right: 1px solid #20222a; background: #101117; display: flex; flex-direction: column; }
+.shell { min-height: 100vh; display: grid; grid-template-columns: 244px minmax(0, 1fr); background: #0b0c10; }
+aside { position: sticky; top: 0; height: 100vh; padding: 25px 14px 18px; border-right: 1px solid #202129; background: #101116; display: flex; flex-direction: column; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 10px 32px; }
 .brand > span { width: 31px; height: 31px; border-radius: 9px; display: grid; place-items: center; background: var(--purple); font-size: 15px; font-weight: 700; }
 .brand strong, .brand small { display: block; }
-.brand strong { font-size: 14px; font-weight: 600; }
+.brand strong { font-family: "Space Grotesk", sans-serif; font-size: 14px; font-weight: 600; }
 .brand small { font-size: 11px; color: var(--muted); margin-top: 2px; }
 nav { display: grid; gap: 5px; }
 nav button { border: 0; border-radius: 8px; padding: 11px 12px; background: none; color: #8e919f; display: flex; align-items: center; gap: 11px; text-align: left; }
@@ -29,7 +31,7 @@ main { min-width: 0; display: grid; grid-template-rows: auto 1fr auto; }
 header { padding: 29px clamp(24px, 4vw, 58px) 23px; border-bottom: 1px solid #1e2027; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 header span, .section-title span, .notice span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .11em; }
 h1, h2, h3, p { margin: 0; }
-h1, h2, h3 { font-family: inherit; }
+h1, h2, h3 { font-family: "Space Grotesk", sans-serif; }
 h1 { font-size: clamp(22px, 2.3vw, 30px); margin-top: 6px; }
 .health { border: 1px solid #292c35; border-radius: 999px; padding: 8px 12px; color: #aaaeba; font-size: 12px; text-transform: capitalize; }
 .health i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #d19a43; margin-right: 7px; }

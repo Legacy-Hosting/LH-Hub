@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import packageMetadata from "../../package.json";
 import {
   Activity,
   ClipboardList,
@@ -394,7 +395,7 @@ function App() {
             </>
           )}
         </section>
-        <footer><span>LH-Hub v0.6.1</span><span>{clock}</span></footer>
+        <footer><span>LH-Hub v{packageMetadata.version}</span><span>{clock}</span></footer>
       </main>
     </div>
   );
