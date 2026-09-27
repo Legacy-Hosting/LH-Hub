@@ -243,7 +243,7 @@ export async function buildApp(options: {
   });
 
   app.post("/api/v1/client-diagnostics", {
-    config: { rateLimit: { max: 10, timeWindow: "1 minute" } },
+    config: { rateLimit: { max: 30, timeWindow: "1 minute" } },
   }, async (request, reply) => {
     reply.header("Cache-Control", "no-store");
     const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
@@ -252,6 +252,7 @@ export async function buildApp(options: {
     const body = z.object({
       version: z.string().max(20),
       path: z.string().startsWith("/").max(120),
+      trigger: z.enum(["load", "periodic", "after_click", "after_input"]).optional(),
       state: z.enum(["shell", "auth", "error", "bootstrap", "empty"]),
       blank: z.boolean(),
       rootChildCount: z.number().int().min(0).max(100),
@@ -263,6 +264,10 @@ export async function buildApp(options: {
       viewportWidth: z.number().int().min(0).max(100_000),
       viewportHeight: z.number().int().min(0).max(100_000),
       topElement: z.string().max(30),
+      centerElement: z.string().max(30).optional(),
+      shellDisplay: z.string().max(30).optional(),
+      shellVisibility: z.string().max(30).optional(),
+      shellOpacity: z.string().max(30).optional(),
       runtimeError: z.string().max(200),
     }).strict().safeParse(request.body);
     if (!body.success) return reply.status(400).send({ error: "invalid_client_diagnostic" });
