@@ -9,6 +9,11 @@ curl --fail --silent --show-error http://127.0.0.1:8081/health | \
   grep -q '"status":"ok"'
 pm2 describe lh-hub >/dev/null
 current_release=$(readlink -f "$base/current")
+recorded_release=$(cat "$base/current-release")
+if [[ $recorded_release != "$(basename "$current_release")" ]]; then
+  echo "Hub current-release marker does not match the current symlink" >&2
+  exit 1
+fi
 if [[ $current_release != "$base/releases/"* ]]; then
   echo "Hub current symlink points outside the release directory" >&2
   exit 1
