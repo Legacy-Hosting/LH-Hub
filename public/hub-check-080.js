@@ -18,6 +18,19 @@
   let inputTimer;
   const startedAt = Date.now();
 
+  function elementDetail(element) {
+    if (!element) return "none";
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    const ancestry = [element, element.parentElement, element.parentElement?.parentElement]
+      .filter(Boolean)
+      .map((item) => {
+        const classes = typeof item.className === "string" ? item.className.trim().replaceAll(/\s+/g, ".") : "";
+        return `${item.tagName.toLowerCase()}#${item.id || "-"}.${classes.slice(0, 60)}`;
+      }).join(">");
+    return `${ancestry}|${style.position}|z=${style.zIndex}|bg=${style.backgroundColor}|rect=${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)},${Math.round(rect.height)}`.slice(0, 300);
+  }
+
   function report(trigger) {
     if (document.visibilityState !== "visible") return;
     const root = document.getElementById("root");
@@ -37,6 +50,7 @@
     const topElement = document.elementFromPoint(Math.min(20, window.innerWidth - 1), Math.min(150, window.innerHeight - 1));
     const centerElement = document.elementFromPoint(Math.min(500, window.innerWidth - 1), Math.min(200, window.innerHeight - 1));
     const shellStyle = shell && getComputedStyle(shell);
+    const asideStyle = aside && getComputedStyle(aside);
     const signature = [state, blank, visibleTextLength, shellHeight, headerHeight, asideWidth, topElement?.tagName, centerElement?.tagName, runtimeError].join("/");
     const now = Date.now();
     if (trigger === "periodic" && signature === lastSignature && now - lastReportAt < 30_000) return;
@@ -48,7 +62,7 @@
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        version: "0.7.9",
+        version: "0.7.10",
         path: window.location.pathname,
         trigger,
         state,
@@ -63,9 +77,16 @@
         viewportHeight: window.innerHeight,
         topElement: String(topElement?.tagName || "none").slice(0, 30),
         centerElement: String(centerElement?.tagName || "none").slice(0, 30),
+        topDetail: elementDetail(topElement),
+        centerDetail: elementDetail(centerElement),
         shellDisplay: String(shellStyle?.display || "none").slice(0, 30),
         shellVisibility: String(shellStyle?.visibility || "none").slice(0, 30),
         shellOpacity: String(shellStyle?.opacity || "none").slice(0, 30),
+        asideDisplay: String(asideStyle?.display || "none").slice(0, 30),
+        asideVisibility: String(asideStyle?.visibility || "none").slice(0, 30),
+        asideOpacity: String(asideStyle?.opacity || "none").slice(0, 30),
+        asideLeft: Math.round(aside?.getBoundingClientRect().left || 0),
+        headerTop: Math.round(header?.getBoundingClientRect().top || 0),
         runtimeError,
       }),
       keepalive: true,

@@ -265,9 +265,16 @@ export async function buildApp(options: {
       viewportHeight: z.number().int().min(0).max(100_000),
       topElement: z.string().max(30),
       centerElement: z.string().max(30).optional(),
+      topDetail: z.string().max(300).optional(),
+      centerDetail: z.string().max(300).optional(),
       shellDisplay: z.string().max(30).optional(),
       shellVisibility: z.string().max(30).optional(),
       shellOpacity: z.string().max(30).optional(),
+      asideDisplay: z.string().max(30).optional(),
+      asideVisibility: z.string().max(30).optional(),
+      asideOpacity: z.string().max(30).optional(),
+      asideLeft: z.number().int().min(-100_000).max(100_000).optional(),
+      headerTop: z.number().int().min(-100_000).max(100_000).optional(),
       runtimeError: z.string().max(200),
     }).strict().safeParse(request.body);
     if (!body.success) return reply.status(400).send({ error: "invalid_client_diagnostic" });

@@ -236,7 +236,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-    version: "0.7.9",
+    version: "0.7.10",
   });
 });
 
@@ -421,7 +421,7 @@ test("client render failures are accepted only from an authenticated Hub page", 
 
 test("client visibility diagnostics require a same-origin staff session", async () => {
   const payload = {
-    version: "0.7.9",
+    version: "0.7.10",
     path: "/infrastructure",
     state: "shell",
     blank: false,
