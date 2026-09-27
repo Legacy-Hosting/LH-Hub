@@ -1,5 +1,6 @@
 import * as oidc from "openid-client";
 import type { HubOidcProtocol, OidcTokenResult } from "./browser-auth.js";
+import { createLogoutHint } from "./logout-hint.js";
 
 function tokenResult(tokens: oidc.TokenEndpointResponse): OidcTokenResult {
   if (typeof tokens.access_token !== "string" || !tokens.access_token) {
@@ -105,10 +106,18 @@ export function createHubOidcProtocol(options: {
     },
 
     async endSessionUrl() {
-      return oidc.buildEndSessionUrl(await configuration(), {
+      const postLogoutRedirectUri = new URL("/", options.redirectUri).toString();
+      const logoutUrl = oidc.buildEndSessionUrl(await configuration(), {
         client_id: options.clientId,
-        post_logout_redirect_uri: new URL("/", options.redirectUri).toString(),
+        post_logout_redirect_uri: postLogoutRedirectUri,
       });
+      logoutUrl.searchParams.set("logout_hint", createLogoutHint({
+        audience: options.issuer,
+        clientId: options.clientId,
+        clientSecret: options.clientSecret,
+        redirectUri: postLogoutRedirectUri,
+      }));
+      return logoutUrl;
     },
   };
 }

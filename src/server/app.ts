@@ -22,6 +22,7 @@ import {
   type FetchImplementation,
 } from "./service-health.js";
 import { HUB_VERSION } from "./version.js";
+import type { HubSettingsService } from "./settings.js";
 
 export async function buildApp(options: {
   tokenVerifier?: TokenVerifier;
@@ -34,6 +35,7 @@ export async function buildApp(options: {
   auditReader?: AuditReader;
   operationsReader?: OperationsReader;
   publicStatusReader?: PublicStatusReader;
+  settings?: HubSettingsService;
 } = {}) {
   const app = Fastify({
     logger: env.NODE_ENV === "production",
@@ -245,6 +247,71 @@ export async function buildApp(options: {
       return { state: "not_configured", fetchedAt: null, droplets: [] };
     }
     return options.infrastructureReader();
+  });
+
+  app.get("/api/v1/settings/digitalocean", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(
+      request.headers.authorization,
+      request.headers.cookie,
+    );
+    if ("error" in authorization) {
+      return reply.status(authorization.statusCode).send({ error: authorization.error });
+    }
+    if (!hasCapability(authorization.identity, "settings:write")) {
+      return reply.status(403).send({ error: "platform_admin_required" });
+    }
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    return options.settings.digitalOceanStatus();
+  });
+
+  app.put("/api/v1/settings/digitalocean", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(
+      request.headers.authorization,
+      request.headers.cookie,
+    );
+    if ("error" in authorization) {
+      return reply.status(authorization.statusCode).send({ error: authorization.error });
+    }
+    if (!hasCapability(authorization.identity, "settings:write")) {
+      return reply.status(403).send({ error: "platform_admin_required" });
+    }
+    if (request.headers.origin !== new URL(hubOrigin).origin) {
+      return reply.status(403).send({ error: "invalid_origin" });
+    }
+    const body = z.object({
+      token: z.string().min(32).max(512).regex(/^\S+$/),
+    }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_digitalocean_token" });
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    try {
+      await options.settings.saveDigitalOceanToken(body.data.token);
+      return { configured: true, source: "stored" };
+    } catch {
+      request.log.warn("DigitalOcean token validation or storage failed");
+      return reply.status(400).send({ error: "digitalocean_token_rejected" });
+    }
+  });
+
+  app.delete("/api/v1/settings/digitalocean", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(
+      request.headers.authorization,
+      request.headers.cookie,
+    );
+    if ("error" in authorization) {
+      return reply.status(authorization.statusCode).send({ error: authorization.error });
+    }
+    if (!hasCapability(authorization.identity, "settings:write")) {
+      return reply.status(403).send({ error: "platform_admin_required" });
+    }
+    if (request.headers.origin !== new URL(hubOrigin).origin) {
+      return reply.status(403).send({ error: "invalid_origin" });
+    }
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    await options.settings.clearDigitalOceanToken();
+    return options.settings.digitalOceanStatus();
   });
 
   app.get("/api/v1/operations", async (request, reply) => {

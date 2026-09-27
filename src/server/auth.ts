@@ -18,6 +18,7 @@ export const hubCapabilities = [
   "support:read",
   "sales:read",
   "audit:read",
+  "settings:write",
 ] as const;
 
 export type StaffRole = (typeof staffRoles)[number];
@@ -25,7 +26,7 @@ export type HubCapability = (typeof hubCapabilities)[number];
 
 const roleCapabilities: Record<StaffRole, readonly HubCapability[]> = {
   founder: hubCapabilities,
-  management: hubCapabilities,
+  management: hubCapabilities.filter((capability) => capability !== "settings:write"),
   platform_admin: hubCapabilities,
   developer: ["services:read", "infrastructure:read", "operations:read"],
   infrastructure: ["services:read", "infrastructure:read", "operations:read"],

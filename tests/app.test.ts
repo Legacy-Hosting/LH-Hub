@@ -6,6 +6,7 @@ import { buildApp } from "../src/server/app.js";
 let app: FastifyInstance;
 let loggedOutToken: string | undefined;
 let revokedSubject: string | undefined;
+let storedDigitalOceanToken: string | undefined;
 
 before(async () => {
   app = await buildApp({
@@ -14,6 +15,8 @@ before(async () => {
         ? { sub: "user-1", name: "Support", roles: ["support"] }
         : token === "infrastructure-token"
           ? { sub: "user-3", name: "Infrastructure", roles: ["infrastructure"] }
+          : token === "admin-token"
+            ? { sub: "user-4", name: "Administrator", roles: ["platform_admin"] }
         : { sub: "user-2", roles: [] },
     browserAuth: {
       begin: async () => ({
@@ -104,6 +107,19 @@ before(async () => {
       components: [],
       events: [],
     }),
+    settings: {
+      digitalOceanToken: async () => storedDigitalOceanToken,
+      digitalOceanStatus: async () => ({
+        configured: Boolean(storedDigitalOceanToken),
+        source: storedDigitalOceanToken ? "stored" : "none",
+      }),
+      saveDigitalOceanToken: async (token) => {
+        storedDigitalOceanToken = token;
+      },
+      clearDigitalOceanToken: async () => {
+        storedDigitalOceanToken = undefined;
+      },
+    },
   });
 });
 
@@ -117,7 +133,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-      version: "0.6.5",
+      version: "0.6.6",
   });
 });
 
@@ -229,6 +245,41 @@ test("service checks run server-side for authorized staff", async () => {
   assert.equal(infrastructure.json().state, "ready");
   assert.equal(infrastructure.json().droplets[0].name, "ams3-hub-01");
   assert.equal(JSON.stringify(infrastructure.json()).includes("token"), false);
+});
+
+test("only platform administrators can manage the encrypted DigitalOcean token", async () => {
+  const denied = await app.inject({
+    method: "GET",
+    url: "/api/v1/settings/digitalocean",
+    headers: { authorization: "Bearer infrastructure-token" },
+  });
+  assert.equal(denied.statusCode, 403);
+
+  const invalidOrigin = await app.inject({
+    method: "PUT",
+    url: "/api/v1/settings/digitalocean",
+    headers: { authorization: "Bearer admin-token", origin: "https://attacker.invalid" },
+    payload: { token: "x".repeat(40) },
+  });
+  assert.equal(invalidOrigin.statusCode, 403);
+
+  const saved = await app.inject({
+    method: "PUT",
+    url: "/api/v1/settings/digitalocean",
+    headers: { authorization: "Bearer admin-token", origin: "https://hub.legacyhosting.xyz" },
+    payload: { token: "x".repeat(40) },
+  });
+  assert.equal(saved.statusCode, 200);
+  assert.equal(saved.json().configured, true);
+  assert.equal(JSON.stringify(saved.json()).includes("x".repeat(40)), false);
+
+  const removed = await app.inject({
+    method: "DELETE",
+    url: "/api/v1/settings/digitalocean",
+    headers: { authorization: "Bearer admin-token", origin: "https://hub.legacyhosting.xyz" },
+  });
+  assert.equal(removed.statusCode, 200);
+  assert.equal(removed.json().configured, false);
 });
 
 test("audit events are proxied only for audit-capable staff", async () => {

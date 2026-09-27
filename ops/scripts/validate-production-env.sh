@@ -18,6 +18,7 @@ set -a
 set +a
 required=(NODE_ENV HOST PORT SSO_ISSUER SSO_AUDIENCE SSO_JWKS_URL SSO_CLIENT_ID \
   SSO_CLIENT_SECRET SSO_REDIRECT_URI SSO_RESOURCE SSO_REQUEST_TIMEOUT_MS HUB_ORIGIN HUB_SESSION_TTL_SECONDS \
+  HUB_SETTINGS_KEY HUB_SETTINGS_FILE \
   API_ORIGIN API_REQUEST_TIMEOUT_MS STATUS_API_URL \
   SERVICE_HEALTH_TARGETS DIGITALOCEAN_REQUEST_TIMEOUT_MS \
   DIGITALOCEAN_CACHE_TTL_MS DIGITALOCEAN_METRIC_WINDOW_SECONDS)
@@ -40,6 +41,14 @@ if [[ $SSO_ISSUER != https://* || $SSO_JWKS_URL != https://* || \
 fi
 if [[ ${#SSO_CLIENT_SECRET} -lt 32 ]]; then
   echo "SSO_CLIENT_SECRET must contain at least 32 characters" >&2
+  exit 1
+fi
+if [[ ! $HUB_SETTINGS_KEY =~ ^[a-fA-F0-9]{64}$ ]]; then
+  echo "HUB_SETTINGS_KEY must be a 32-byte hexadecimal encryption key" >&2
+  exit 1
+fi
+if [[ $HUB_SETTINGS_FILE != /var/lib/legacy-hosting/hub/settings.enc.json ]]; then
+  echo "HUB_SETTINGS_FILE must use the protected persistent Hub settings path" >&2
   exit 1
 fi
 if [[ -n ${DIGITALOCEAN_TOKEN:-} ]] && \

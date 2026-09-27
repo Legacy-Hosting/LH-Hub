@@ -33,6 +33,7 @@ for certificate_file in fullchain.pem privkey.pem; do
   fi
 done
 install -d -m 0755 "$base/releases" /var/www
+install -d -m 0700 /var/lib/legacy-hosting/hub
 staging=$(mktemp -d "$base/releases/.staging-${version}.XXXXXX")
 trap 'rm -rf -- "$staging"' EXIT
 tar -xzf "$archive" --no-same-owner --strip-components=1 -C "$staging"

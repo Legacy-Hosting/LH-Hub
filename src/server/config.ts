@@ -40,6 +40,8 @@ const schema = z
       .max(15_000)
       .default(5_000),
     DIGITALOCEAN_TOKEN: z.string().min(32).regex(/^\S+$/).optional(),
+    HUB_SETTINGS_KEY: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
+    HUB_SETTINGS_FILE: z.string().min(1).default("./data/settings.enc.json"),
     DIGITALOCEAN_REQUEST_TIMEOUT_MS: z.coerce
       .number()
       .int()
@@ -68,6 +70,7 @@ const schema = z
       "SSO_CLIENT_SECRET",
       "SSO_REDIRECT_URI",
       "SSO_RESOURCE",
+      "HUB_SETTINGS_KEY",
     ] as const) {
       if (!value[field]) {
         context.addIssue({

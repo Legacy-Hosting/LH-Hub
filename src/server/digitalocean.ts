@@ -348,3 +348,19 @@ export function createDigitalOceanInfrastructureReader(
     return pending;
   };
 }
+
+export function createConfigurableDigitalOceanInfrastructureReader(
+  options: Omit<ReaderOptions, "token"> & { tokenProvider: () => Promise<string | undefined> },
+): InfrastructureReader {
+  let activeToken: string | undefined;
+  let activeReader: InfrastructureReader | undefined;
+  return async () => {
+    const token = await options.tokenProvider();
+    if (!token) return { state: "not_configured", fetchedAt: null, droplets: [] };
+    if (!activeReader || token !== activeToken) {
+      activeToken = token;
+      activeReader = createDigitalOceanInfrastructureReader({ ...options, token });
+    }
+    return activeReader();
+  };
+}

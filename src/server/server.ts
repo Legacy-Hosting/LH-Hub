@@ -5,10 +5,11 @@ import {
 } from "./auth.js";
 import { createBrowserAuth } from "./browser-auth.js";
 import { env } from "./config.js";
-import { createDigitalOceanInfrastructureReader } from "./digitalocean.js";
+import { createConfigurableDigitalOceanInfrastructureReader } from "./digitalocean.js";
 import { createHubOidcProtocol } from "./oidc-client.js";
 import { createAuditReader } from "./audit.js";
 import { createOperationsReader, createPublicStatusReader } from "./operations.js";
+import { createHubSettingsService } from "./settings.js";
 
 const tokenVerifier =
   env.SSO_ISSUER && env.SSO_JWKS_URL
@@ -43,8 +44,18 @@ const logoutTokenVerifier = env.SSO_ISSUER && env.SSO_CLIENT_ID && env.SSO_JWKS_
       jwksUrl: env.SSO_JWKS_URL,
     })
   : undefined;
-const infrastructureReader = createDigitalOceanInfrastructureReader({
-  ...(env.DIGITALOCEAN_TOKEN ? { token: env.DIGITALOCEAN_TOKEN } : {}),
+const settings = env.HUB_SETTINGS_KEY
+  ? createHubSettingsService({
+      file: env.HUB_SETTINGS_FILE,
+      encryptionKey: env.HUB_SETTINGS_KEY,
+      ...(env.DIGITALOCEAN_TOKEN
+        ? { environmentDigitalOceanToken: env.DIGITALOCEAN_TOKEN }
+        : {}),
+      timeoutMs: env.DIGITALOCEAN_REQUEST_TIMEOUT_MS,
+    })
+  : undefined;
+const infrastructureReader = createConfigurableDigitalOceanInfrastructureReader({
+  tokenProvider: async () => settings?.digitalOceanToken() ?? env.DIGITALOCEAN_TOKEN,
   timeoutMs: env.DIGITALOCEAN_REQUEST_TIMEOUT_MS,
   cacheMs: env.DIGITALOCEAN_CACHE_TTL_MS,
   metricWindowSeconds: env.DIGITALOCEAN_METRIC_WINDOW_SECONDS,
@@ -69,6 +80,7 @@ const app = await buildApp({
   auditReader,
   operationsReader,
   publicStatusReader,
+  ...(settings ? { settings } : {}),
 });
 
 const shutdown = async (signal: string) => {

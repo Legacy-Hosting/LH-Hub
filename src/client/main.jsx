@@ -14,6 +14,7 @@ import {
   Network,
   RefreshCw,
   Server,
+  Settings,
   ShieldCheck,
   ShoppingBag,
   Users,
@@ -27,6 +28,7 @@ const navigation = [
   { key: "support", capability: "support:read", icon: Users, label: "Support" },
   { key: "sales", capability: "sales:read", icon: ShoppingBag, label: "Sales" },
   { key: "audit", capability: "audit:read", icon: ClipboardList, label: "Audit log" },
+  { key: "settings", capability: "settings:write", icon: Settings, label: "Settings" },
 ];
 
 const roleLabels = {
@@ -156,6 +158,10 @@ function App() {
   });
   const [activeSection, setActiveSection] = useState("overview");
   const [showLogout, setShowLogout] = useState(false);
+  const [digitalOceanSettings, setDigitalOceanSettings] = useState({ configured: false, source: "none" });
+  const [digitalOceanToken, setDigitalOceanToken] = useState("");
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState("");
   const authError = new URLSearchParams(window.location.search).has("auth_error");
 
   useEffect(() => {
@@ -174,7 +180,8 @@ function App() {
       const canViewInfrastructure = capabilities.includes("infrastructure:read");
       const canViewOperations = capabilities.includes("operations:read");
       const canViewAudit = capabilities.includes("audit:read");
-      const [overviewResult, infrastructureResult, operationsResult, auditResult] = await Promise.allSettled([
+      const canWriteSettings = capabilities.includes("settings:write");
+      const [overviewResult, infrastructureResult, operationsResult, auditResult, settingsResult] = await Promise.allSettled([
         jsonResponse("/api/v1/overview"),
         canViewInfrastructure
           ? jsonResponse("/api/v1/infrastructure")
@@ -184,6 +191,9 @@ function App() {
           : Promise.resolve(null),
         canViewAudit
           ? jsonResponse("/api/v1/audit-events")
+          : Promise.resolve(null),
+        canWriteSettings
+          ? jsonResponse("/api/v1/settings/digitalocean")
           : Promise.resolve(null),
       ]);
       if (active) {
@@ -219,6 +229,9 @@ function App() {
           setAudit({ state: "ready", ...auditResult.value });
         } else if (canViewAudit) {
           setAudit((current) => ({ ...current, state: "unavailable" }));
+        }
+        if (canWriteSettings && settingsResult.status === "fulfilled" && settingsResult.value) {
+          setDigitalOceanSettings(settingsResult.value);
         }
       }
       refreshing = false;
@@ -296,6 +309,50 @@ function App() {
       }));
     } catch {
       setAudit((current) => ({ ...current, state: "unavailable" }));
+    }
+  }
+
+  async function saveDigitalOceanToken(event) {
+    event.preventDefault();
+    setSettingsBusy(true);
+    setSettingsMessage("");
+    try {
+      const response = await fetch("/api/v1/settings/digitalocean", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ token: digitalOceanToken }),
+      });
+      if (!response.ok) throw new Error("DigitalOcean rejected the token. Check its value and read permissions.");
+      setDigitalOceanSettings(await response.json());
+      setDigitalOceanToken("");
+      setSettingsMessage("DigitalOcean token saved and verified.");
+      const snapshot = await jsonResponse("/api/v1/infrastructure");
+      setInfrastructure(snapshot);
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "The token could not be saved.");
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  async function clearDigitalOceanToken() {
+    setSettingsBusy(true);
+    setSettingsMessage("");
+    try {
+      const response = await fetch("/api/v1/settings/digitalocean", {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("The stored token could not be removed.");
+      setDigitalOceanSettings(await response.json());
+      setInfrastructure({ state: "loading", fetchedAt: null, droplets: [] });
+      setSettingsMessage("Stored DigitalOcean token removed.");
+    } catch (error) {
+      setSettingsMessage(error instanceof Error ? error.message : "The token could not be removed.");
+    } finally {
+      setSettingsBusy(false);
     }
   }
 
@@ -499,6 +556,51 @@ function App() {
                 )}
               </div>
             </>
+          )}
+
+          {activeNavigation.key === "settings" && (
+            <div className="settings-workspace">
+              <div className="section-title settings-title">
+                <div><span>Provider integrations</span><h2>Hub settings</h2></div>
+                <p>Secrets are encrypted on the Hub server and never returned to the browser.</p>
+              </div>
+              <form className="provider-settings-card" onSubmit={saveDigitalOceanToken}>
+                <div className="provider-settings-head">
+                  <div className="workspace-icon"><Settings size={22} /></div>
+                  <div>
+                    <span>DigitalOcean</span>
+                    <h3>Infrastructure API token</h3>
+                    <p>Use a scoped read-only token that can list Droplets and read monitoring metrics.</p>
+                  </div>
+                  <b className={digitalOceanSettings.configured ? "configured" : "missing"}>
+                    {digitalOceanSettings.configured ? "Configured" : "Not configured"}
+                  </b>
+                </div>
+                <label className="token-field">
+                  <span>New token</span>
+                  <input
+                    type="password"
+                    minLength="32"
+                    maxLength="512"
+                    autoComplete="new-password"
+                    placeholder={digitalOceanSettings.configured ? "Enter a new token to replace the current one" : "dop_v1_..."}
+                    value={digitalOceanToken}
+                    onChange={(event) => setDigitalOceanToken(event.target.value)}
+                    required
+                  />
+                </label>
+                {settingsMessage && <p className="settings-message" role="status">{settingsMessage}</p>}
+                <div className="provider-actions">
+                  {digitalOceanSettings.source === "stored" && (
+                    <button className="secondary" type="button" disabled={settingsBusy} onClick={clearDigitalOceanToken}>Remove stored token</button>
+                  )}
+                  <button className="primary" type="submit" disabled={settingsBusy || digitalOceanToken.length < 32}>
+                    {settingsBusy ? <RefreshCw className="spin" size={15} /> : <ShieldCheck size={15} />}
+                    Verify and save token
+                  </button>
+                </div>
+              </form>
+            </div>
           )}
         </section>
         <footer>
