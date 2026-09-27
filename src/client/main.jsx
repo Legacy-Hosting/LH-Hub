@@ -162,6 +162,78 @@ function githubConfigurationSignature(configuration) {
     .sort((left, right) => left.fullName.localeCompare(right.fullName)));
 }
 
+const statusLayoutDraftKey = "lh-hub-status-layout-draft-v1";
+
+function readStatusLayoutDraft() {
+  try {
+    const draft = JSON.parse(window.sessionStorage.getItem(statusLayoutDraftKey) ?? "null");
+    return Array.isArray(draft?.components)
+      && draft.components.every((component) => component && typeof component === "object" && typeof component.server === "string")
+      ? draft
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function infrastructureWithDraft(snapshot, draft) {
+  if (!draft || !Array.isArray(snapshot?.statusComponents?.components)) return snapshot;
+  const currentByServer = new Map(snapshot.statusComponents.components.map((component) => [component.server, component]));
+  const restored = draft.components.flatMap((component) => {
+    const current = currentByServer.get(component.server);
+    return current ? [{ ...current, ...component, componentKey: current.componentKey }] : [];
+  });
+  const restoredServers = new Set(restored.map((component) => component.server));
+  return {
+    ...snapshot,
+    statusComponents: {
+      ...snapshot.statusComponents,
+      components: [
+        ...restored,
+        ...snapshot.statusComponents.components.filter((component) => !restoredServers.has(component.server)),
+      ],
+    },
+  };
+}
+
+class HubErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error, info) {
+    void fetch("/api/v1/client-errors", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: String(error?.name ?? "Error").slice(0, 80),
+        message: String(error?.message ?? "Unknown error").slice(0, 300),
+        componentStack: String(info.componentStack ?? "").slice(0, 3000),
+        path: window.location.pathname.slice(0, 120),
+      }),
+    }).catch(() => {});
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <main className="hub-error-screen" role="alert">
+        <section className="auth-card">
+          <h1>Staff Hub encountered an error</h1>
+          <p>Your changes may still be stored in this browser session. Reload to try again.</p>
+          <button className="primary auth-button" type="button" onClick={() => window.location.reload()}>Reload Hub</button>
+        </section>
+      </main>
+    );
+  }
+}
+
 function App() {
   const [now, setNow] = useState(new Date());
   const [health, setHealth] = useState("checking");
@@ -194,6 +266,8 @@ function App() {
   const [settingsMessage, setSettingsMessage] = useState("");
   const [statusLayoutBusy, setStatusLayoutBusy] = useState(false);
   const [statusLayoutMessage, setStatusLayoutMessage] = useState("");
+  const statusLayoutDraftRef = useRef(readStatusLayoutDraft());
+  const statusLayoutDirtyRef = useRef(Boolean(statusLayoutDraftRef.current));
   const [discordConfiguration, setDiscordConfiguration] = useState(null);
   const [discordBusy, setDiscordBusy] = useState(false);
   const [discordMessage, setDiscordMessage] = useState("");
@@ -284,7 +358,10 @@ function App() {
           infrastructureResult.status === "fulfilled" &&
           infrastructureResult.value
         ) {
-          setInfrastructure(infrastructureResult.value);
+          setInfrastructure(infrastructureWithDraft(
+            infrastructureResult.value,
+            canWriteSettings && statusLayoutDirtyRef.current ? statusLayoutDraftRef.current : null,
+          ));
         } else if (canViewInfrastructure) {
           setInfrastructure((current) => ({
             ...current,
@@ -458,6 +535,13 @@ function App() {
   }
 
   function editStatusComponents(configuration) {
+    statusLayoutDraftRef.current = configuration;
+    statusLayoutDirtyRef.current = true;
+    try {
+      window.sessionStorage.setItem(statusLayoutDraftKey, JSON.stringify(configuration));
+    } catch {
+      // Keep the in-memory draft if session storage is unavailable.
+    }
     setStatusLayoutMessage("");
     setInfrastructure((current) => ({ ...current, statusComponents: configuration }));
   }
@@ -488,6 +572,13 @@ function App() {
       });
       if (!response.ok) throw new Error("The Status layout could not be saved. Check all visible service addresses and origin FQDNs.");
       const statusComponents = await response.json();
+      statusLayoutDraftRef.current = null;
+      statusLayoutDirtyRef.current = false;
+      try {
+        window.sessionStorage.removeItem(statusLayoutDraftKey);
+      } catch {
+        // The saved configuration is already authoritative.
+      }
       setInfrastructure((current) => ({ ...current, statusComponents }));
       setStatusLayoutMessage("Status layout and direct origin addresses were saved.");
     } catch (error) {
@@ -1035,4 +1126,4 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(<HubErrorBoundary><App /></HubErrorBoundary>);

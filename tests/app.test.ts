@@ -236,7 +236,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-    version: "0.7.5",
+    version: "0.7.6",
   });
 });
 
@@ -385,6 +385,38 @@ test("platform administrators configure Status services with direct origin FQDNs
   assert.equal(publicView.statusCode, 200);
   assert.equal(publicView.json()[0].connectHostname, "ams3.hub-01.legacyh.fyi");
   assert.equal(publicView.headers["cache-control"], "public, max-age=15, stale-if-error=300");
+});
+
+test("client render failures are accepted only from an authenticated Hub page", async () => {
+  const payload = {
+    name: "TypeError",
+    message: "A component failed to render",
+    componentStack: "at StatusComponentManager",
+    path: "/infrastructure",
+  };
+  const unauthenticated = await app.inject({
+    method: "POST",
+    url: "/api/v1/client-errors",
+    headers: { origin: "https://hub.legacyhosting.xyz" },
+    payload,
+  });
+  assert.equal(unauthenticated.statusCode, 401);
+
+  const foreignOrigin = await app.inject({
+    method: "POST",
+    url: "/api/v1/client-errors",
+    headers: { authorization: "Bearer admin-token", origin: "https://attacker.invalid" },
+    payload,
+  });
+  assert.equal(foreignOrigin.statusCode, 403);
+
+  const accepted = await app.inject({
+    method: "POST",
+    url: "/api/v1/client-errors",
+    headers: { authorization: "Bearer admin-token", origin: "https://hub.legacyhosting.xyz" },
+    payload,
+  });
+  assert.equal(accepted.statusCode, 204);
 });
 
 test("only platform administrators can manage the encrypted DigitalOcean token", async () => {

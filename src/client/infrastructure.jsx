@@ -1,26 +1,42 @@
 import React from "react";
 import { GripVertical, MonitorUp, RefreshCw, Save } from "lucide-react";
 
-function secondarySort(left, right) {
-  return left.datacenter.localeCompare(right.datacenter, undefined, { numeric: true })
-    || left.service.localeCompare(right.service, undefined, { numeric: true })
-    || left.number.localeCompare(right.number, undefined, { numeric: true });
+function safeText(value) {
+  return typeof value === "string" ? value : "";
 }
 
-function orderedComponents(components) {
-  return [
-    ...components.filter((component) => component.primary),
-    ...components.filter((component) => !component.primary).sort(secondarySort),
-  ];
+function normalizedComponent(component) {
+  return {
+    ...component,
+    server: safeText(component?.server),
+    componentKey: safeText(component?.componentKey),
+    displayName: safeText(component?.displayName),
+    datacenter: safeText(component?.datacenter),
+    service: safeText(component?.service),
+    number: safeText(component?.number),
+    publicUrl: safeText(component?.publicUrl),
+    originFqdn: safeText(component?.originFqdn),
+    visible: Boolean(component?.visible),
+    primary: Boolean(component?.primary),
+  };
 }
 
 export function StatusComponentManager({ configuration, canConfigure, busy, message, onChange, onSave }) {
-  const components = Array.isArray(configuration?.components) ? configuration.components : [];
+  const components = Array.isArray(configuration?.components)
+    ? configuration.components.filter((component) => component && typeof component === "object").map(normalizedComponent)
+    : [];
   const updateComponent = (server, changes) => {
     const next = components.map((component) => component.server === server
       ? { ...component, ...changes }
       : component);
-    onChange({ ...configuration, components: orderedComponents(next) });
+    const changedPrimary = Object.hasOwn(changes, "primary")
+      && components.find((component) => component.server === server)?.primary !== changes.primary;
+    onChange({
+      ...configuration,
+      components: changedPrimary
+        ? [...next.filter((component) => component.primary), ...next.filter((component) => !component.primary)]
+        : next,
+    });
   };
   const movePrimary = (sourceServer, targetServer) => {
     if (!sourceServer || sourceServer === targetServer) return;
@@ -33,7 +49,7 @@ export function StatusComponentManager({ configuration, canConfigure, busy, mess
     primary.splice(targetIndex, 0, moved);
     onChange({
       ...configuration,
-      components: [...primary, ...components.filter((component) => !component.primary).sort(secondarySort)],
+      components: [...primary, ...components.filter((component) => !component.primary)],
     });
   };
 
@@ -51,15 +67,10 @@ export function StatusComponentManager({ configuration, canConfigure, busy, mess
         <div className="operations-panel empty-state"><MonitorUp size={25} /><p>No DigitalOcean servers are available for Status configuration.</p></div>
       ) : (
         <div className="status-server-grid">
-          {orderedComponents(components).map((component) => (
+          {components.map((component) => (
             <article
               className={component.primary ? "primary-service" : ""}
-              draggable={canConfigure && component.primary}
               key={component.server}
-              onDragStart={(event) => {
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("text/plain", component.server);
-              }}
               onDragOver={(event) => {
                 if (component.primary) event.preventDefault();
               }}
@@ -69,25 +80,33 @@ export function StatusComponentManager({ configuration, canConfigure, busy, mess
               }}
             >
               <div className="status-server-heading">
-                <span className="drag-handle" title={component.primary ? "Drag to reorder main services" : "Enable main service to reorder"}><GripVertical size={17} /></span>
+                <span
+                  className="drag-handle"
+                  draggable={canConfigure && !busy && component.primary}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", component.server);
+                  }}
+                  title={component.primary ? "Drag to reorder main services" : "Enable main service to reorder"}
+                ><GripVertical size={17} /></span>
                 <div><strong>{component.server}</strong><small>{component.componentKey}</small></div>
                 <label className="toggle" title="Show on the public Status page">
-                  <input type="checkbox" checked={component.visible} disabled={!canConfigure} onChange={(event) => updateComponent(component.server, { visible: event.target.checked })} />
+                  <input type="checkbox" checked={component.visible} disabled={!canConfigure || busy} onChange={(event) => updateComponent(component.server, { visible: event.target.checked })} />
                   <i />
                 </label>
               </div>
               <div className="status-server-flags">
-                <label><input type="checkbox" checked={component.primary} disabled={!canConfigure} onChange={(event) => updateComponent(component.server, { primary: event.target.checked, ...(event.target.checked ? { visible: true } : {}) })} />Main service</label>
+                <label><input type="checkbox" checked={component.primary} disabled={!canConfigure || busy} onChange={(event) => updateComponent(component.server, { primary: event.target.checked, ...(event.target.checked ? { visible: true } : {}) })} />Main service</label>
                 <span>{component.visible ? "Visible on Status" : "Hidden from Status"}</span>
               </div>
-              <label className="token-field"><span>Display name</span><input value={component.displayName} disabled={!canConfigure} maxLength="80" onChange={(event) => updateComponent(component.server, { displayName: event.target.value })} /></label>
+              <label className="token-field"><span>Display name</span><input value={component.displayName} disabled={!canConfigure || busy} maxLength="80" onChange={(event) => updateComponent(component.server, { displayName: event.target.value })} /></label>
               <div className="status-metadata-grid">
-                <label className="token-field"><span>Datacenter</span><input list="status-datacenters" value={component.datacenter} disabled={!canConfigure} maxLength="80" onChange={(event) => updateComponent(component.server, { datacenter: event.target.value })} /></label>
-                <label className="token-field"><span>Service</span><input list="status-services" value={component.service} disabled={!canConfigure} maxLength="80" onChange={(event) => updateComponent(component.server, { service: event.target.value })} /></label>
-                <label className="token-field"><span>Number</span><input value={component.number} disabled={!canConfigure} maxLength="12" onChange={(event) => updateComponent(component.server, { number: event.target.value.replaceAll(/[^A-Za-z0-9-]/g, "") })} /></label>
+                <label className="token-field"><span>Datacenter</span><input list="status-datacenters" value={component.datacenter} disabled={!canConfigure || busy} maxLength="80" onChange={(event) => updateComponent(component.server, { datacenter: event.target.value })} /></label>
+                <label className="token-field"><span>Service</span><input list="status-services" value={component.service} disabled={!canConfigure || busy} maxLength="80" onChange={(event) => updateComponent(component.server, { service: event.target.value })} /></label>
+                <label className="token-field"><span>Number</span><input value={component.number} disabled={!canConfigure || busy} maxLength="12" onChange={(event) => updateComponent(component.server, { number: event.target.value.replaceAll(/[^A-Za-z0-9-]/g, "") })} /></label>
               </div>
-              <label className="token-field"><span>Public health URL</span><input type="url" value={component.publicUrl} disabled={!canConfigure} placeholder="https://service.legacyhosting.xyz/health" onChange={(event) => updateComponent(component.server, { publicUrl: event.target.value })} /></label>
-              <label className="token-field"><span>Direct origin FQDN</span><input value={component.originFqdn} disabled={!canConfigure} placeholder="ams3.api-01.legacyh.fyi" onChange={(event) => updateComponent(component.server, { originFqdn: event.target.value.trim().toLowerCase() })} /><small>Resolved to an IP by LH-Status. Traffic does not pass through Cloudflare.</small></label>
+              <label className="token-field"><span>Public health URL</span><input type="url" value={component.publicUrl} disabled={!canConfigure || busy} placeholder="https://service.legacyhosting.xyz/health" onChange={(event) => updateComponent(component.server, { publicUrl: event.target.value })} /></label>
+              <label className="token-field"><span>Direct origin FQDN</span><input value={component.originFqdn} disabled={!canConfigure || busy} placeholder="ams3.api-01.legacyh.fyi" onChange={(event) => updateComponent(component.server, { originFqdn: event.target.value.trim().toLowerCase() })} /><small>Resolved to an IP by LH-Status. Traffic does not pass through Cloudflare.</small></label>
             </article>
           ))}
         </div>

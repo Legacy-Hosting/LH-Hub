@@ -226,6 +226,22 @@ export async function buildApp(options: {
     version: HUB_VERSION,
   }));
 
+  app.post("/api/v1/client-errors", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!validBrowserOrigin(request.headers.origin)) return reply.status(403).send({ error: "invalid_origin" });
+    const body = z.object({
+      name: z.string().min(1).max(80),
+      message: z.string().min(1).max(300),
+      componentStack: z.string().max(3000),
+      path: z.string().startsWith("/").max(120),
+    }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_client_error" });
+    request.log.error({ clientError: body.data }, "Staff Hub client render failed");
+    return reply.status(204).send();
+  });
+
   app.get("/api/v1/session", async (request, reply) => {
     reply.header("Cache-Control", "no-store");
     const authorization = await requireStaff(
