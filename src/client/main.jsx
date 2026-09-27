@@ -7,6 +7,7 @@ import {
   ClipboardList,
   Cpu,
   Gauge,
+  GitFork,
   HardDrive,
   LockKeyhole,
   LogIn,
@@ -25,6 +26,7 @@ import {
   DiscordWorkspace,
   MaintenanceWorkspace,
 } from "./discord.jsx";
+import { GitHubWorkspace } from "./github.jsx";
 import "./styles.css";
 
 const navigation = [
@@ -34,6 +36,7 @@ const navigation = [
   { key: "support", path: "/support", capability: "support:read", icon: Users, label: "Support" },
   { key: "sales", path: "/sales", capability: "sales:read", icon: ShoppingBag, label: "Sales" },
   { key: "audit", path: "/audit-log", capability: "audit:read", icon: ClipboardList, label: "Audit log" },
+  { key: "github", path: "/github", capability: "github:manage", icon: GitFork, label: "GitHub" },
   { key: "discord", path: "/discord", capability: "discord:manage", icon: Bot, label: "Discord" },
   { key: "settings", path: "/settings", capability: "settings:write", icon: Settings, label: "Settings" },
 ];
@@ -110,7 +113,7 @@ function AuthGate({ state, authError }) {
   const unavailable = state === "unavailable";
   return (
     <main className="auth-gate">
-      <div className="auth-brand"><img src="https://legacyhosting.xyz/assets/icons/LegacyHostingLogo.png" alt="" /><div><strong>Legacy Hosting</strong><small>Staff Hub</small></div></div>
+      <div className="auth-brand"><img src="/favicon-192.png" alt="Legacy Hosting logo" /><div><strong>Legacy Hosting</strong><small>Staff Hub</small></div></div>
       <section className="auth-card" aria-live="polite">
         <div className="auth-icon"><LockKeyhole size={27} /></div>
         <span>Restricted workspace</span>
@@ -176,6 +179,9 @@ function App() {
   const [discordConfiguration, setDiscordConfiguration] = useState(null);
   const [discordBusy, setDiscordBusy] = useState(false);
   const [discordMessage, setDiscordMessage] = useState("");
+  const [githubConfiguration, setGithubConfiguration] = useState(null);
+  const [githubBusy, setGithubBusy] = useState(false);
+  const [githubMessage, setGithubMessage] = useState("");
   const [maintenanceData, setMaintenanceData] = useState(null);
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState("");
@@ -199,8 +205,9 @@ function App() {
       const canViewAudit = capabilities.includes("audit:read");
       const canWriteSettings = capabilities.includes("settings:write");
       const canManageDiscord = capabilities.includes("discord:manage");
+      const canManageGithub = capabilities.includes("github:manage");
       const canWriteMaintenance = capabilities.includes("maintenance:write");
-      const [overviewResult, infrastructureResult, operationsResult, auditResult, settingsResult, discordResult, maintenanceResult] = await Promise.allSettled([
+      const [overviewResult, infrastructureResult, operationsResult, auditResult, settingsResult, discordResult, maintenanceResult, githubResult] = await Promise.allSettled([
         jsonResponse("/api/v1/overview"),
         canViewInfrastructure
           ? jsonResponse("/api/v1/infrastructure")
@@ -219,6 +226,9 @@ function App() {
           : Promise.resolve(null),
         canWriteMaintenance
           ? jsonResponse("/api/v1/maintenance")
+          : Promise.resolve(null),
+        canManageGithub
+          ? jsonResponse("/api/v1/github")
           : Promise.resolve(null),
       ]);
       if (active) {
@@ -263,6 +273,9 @@ function App() {
         }
         if (canWriteMaintenance && maintenanceResult.status === "fulfilled" && maintenanceResult.value) {
           setMaintenanceData(maintenanceResult.value);
+        }
+        if (canManageGithub && githubResult.status === "fulfilled" && githubResult.value) {
+          setGithubConfiguration(githubResult.value);
         }
       }
       refreshing = false;
@@ -471,6 +484,33 @@ function App() {
     }
   }
 
+  async function saveGithubConfiguration() {
+    if (!githubConfiguration) return;
+    setGithubBusy(true);
+    setGithubMessage("");
+    try {
+      const response = await fetch("/api/v1/github", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          repositories: githubConfiguration.repositories.map(({ fullName, enabled, channelIds }) => ({
+            fullName,
+            enabled,
+            channelIds,
+          })),
+        }),
+      });
+      if (!response.ok) throw new Error("The GitHub configuration could not be saved.");
+      setGithubConfiguration(await response.json());
+      setGithubMessage("Tracked repositories and push channels were saved.");
+    } catch (error) {
+      setGithubMessage(error instanceof Error ? error.message : "The GitHub configuration could not be saved.");
+    } finally {
+      setGithubBusy(false);
+    }
+  }
+
   async function createMaintenance(input) {
     setMaintenanceBusy(true);
     setMaintenanceMessage("");
@@ -519,7 +559,7 @@ function App() {
   return (
     <div className="shell">
       <aside>
-        <div className="brand"><img src="https://legacyhosting.xyz/assets/icons/LegacyHostingLogo.png" alt="" /><div><strong>Legacy Hosting</strong><small>Staff Hub</small></div></div>
+        <div className="brand"><img src="/favicon-192.png" alt="Legacy Hosting logo" /><div><strong>Legacy Hosting</strong><small>Staff Hub</small></div></div>
         <nav aria-label="Hub navigation">
           {visibleNavigation.map(({ key, path, icon: Icon, label }) => (
             <a
@@ -735,6 +775,16 @@ function App() {
               busy={discordBusy}
               message={discordMessage}
               navigate={navigate}
+            />
+          )}
+
+          {activeNavigation.key === "github" && (
+            <GitHubWorkspace
+              configuration={githubConfiguration}
+              onChange={setGithubConfiguration}
+              onSave={saveGithubConfiguration}
+              busy={githubBusy}
+              message={githubMessage}
             />
           )}
 

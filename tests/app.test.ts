@@ -139,6 +139,11 @@ before(async () => {
       }),
       reportDiscordPresence: async () => undefined,
       recordAnnouncementSent: async () => undefined,
+      githubAdminView: async () => ({ repositories: [], channels: [], pendingEvents: 0 }),
+      saveGithubConfiguration: async () => undefined,
+      ingestGithubPush: async () => true,
+      githubPushEvents: async () => [],
+      acknowledgeGithubPushEvents: async () => undefined,
     },
   });
 });
@@ -153,7 +158,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-    version: "0.7.1",
+    version: "0.7.2",
   });
 });
 

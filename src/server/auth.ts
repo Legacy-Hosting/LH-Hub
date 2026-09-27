@@ -18,6 +18,7 @@ export const hubCapabilities = [
   "support:read",
   "sales:read",
   "audit:read",
+  "github:manage",
   "discord:manage",
   "maintenance:write",
   "settings:write",

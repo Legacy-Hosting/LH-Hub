@@ -12,6 +12,68 @@ const encryptedSecretSchema = z.object({
   ciphertext: z.string(),
 });
 
+const githubRepositoryNameSchema = z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).max(255);
+const githubRepositorySettingSchema = z.object({
+  fullName: githubRepositoryNameSchema,
+  enabled: z.boolean(),
+  channelIds: channelIdsSchema,
+});
+const githubRepositorySchema = z.object({
+  fullName: githubRepositoryNameSchema,
+  url: z.string().url(),
+  defaultBranch: z.string().min(1).max(255),
+  private: z.boolean(),
+  lastEventAt: z.string().datetime().optional(),
+});
+const githubPersonSchema = z.object({
+  name: z.string().min(1).max(255),
+  email: z.string().max(320).nullable().optional(),
+});
+const githubCommitSchema = z.object({
+  id: z.string().regex(/^[a-f0-9]{40}$/i),
+  message: z.string().max(20_000),
+  timestamp: z.string(),
+  url: z.string().url(),
+  author: z.object({
+    name: z.string().max(255).nullable().optional(),
+    email: z.string().max(320).nullable().optional(),
+    username: z.string().max(255).nullable().optional(),
+  }).nullable().optional(),
+  committer: z.object({
+    name: z.string().max(255).nullable().optional(),
+    email: z.string().max(320).nullable().optional(),
+    username: z.string().max(255).nullable().optional(),
+  }).nullable().optional(),
+  distinct: z.boolean().optional(),
+});
+export const githubPushEventSchema = z.object({
+  deliveryId: z.string().regex(/^[A-Za-z0-9-]{1,64}$/),
+  repository: githubRepositorySchema.omit({ lastEventAt: true }),
+  ref: z.string().max(500),
+  branch: z.string().min(1).max(255),
+  before: z.string().regex(/^[a-f0-9]{40}$/i),
+  after: z.string().regex(/^[a-f0-9]{40}$/i),
+  compareUrl: z.string().url(),
+  created: z.boolean(),
+  deleted: z.boolean(),
+  forced: z.boolean(),
+  pusher: githubPersonSchema,
+  sender: z.object({
+    login: z.string().min(1).max(255),
+    avatar_url: z.string().url().optional(),
+    html_url: z.string().url().optional(),
+  }),
+  headCommit: githubCommitSchema.nullable(),
+  commits: z.array(githubCommitSchema).max(50),
+  receivedAt: z.string().datetime(),
+  channelIds: channelIdsSchema.optional(),
+});
+const githubSettingsSchema = z.object({
+  repositories: z.array(githubRepositorySettingSchema).default([]),
+  knownRepositories: z.array(githubRepositorySchema).default([]),
+  pendingEvents: z.array(githubPushEventSchema.extend({ channelIds: channelIdsSchema })).default([]),
+}).default({ repositories: [], knownRepositories: [], pendingEvents: [] });
+
 export const discordServiceDefinitions = [
   { key: "api", name: "API", server: "ams3-api-01", url: "https://api.legacyhosting.xyz/health" },
   { key: "sso", name: "SSO", server: "ams3-sso-01", url: "https://auth.legacyhosting.xyz/health" },
@@ -109,6 +171,7 @@ const storedSettingsSchema = z.object({
   version: z.literal(1),
   digitalOceanToken: encryptedSecretSchema.optional(),
   discord: discordSettingsSchema.optional(),
+  github: githubSettingsSchema.optional(),
 });
 type StoredSettings = z.infer<typeof storedSettingsSchema>;
 type AnnouncementKey = z.infer<typeof announcementKeySchema>;
@@ -143,6 +206,11 @@ export type HubSettingsService = {
     channels: Array<{ id: string; name: string }>;
   }): Promise<void>;
   recordAnnouncementSent(key: AnnouncementKey, year: number): Promise<void>;
+  githubAdminView(repositories?: Array<z.infer<typeof githubRepositorySchema>>): Promise<unknown>;
+  saveGithubConfiguration(input: Array<z.infer<typeof githubRepositorySettingSchema>>): Promise<void>;
+  ingestGithubPush(input: z.infer<typeof githubPushEventSchema>): Promise<boolean>;
+  githubPushEvents(limit?: number): Promise<Array<z.infer<typeof githubPushEventSchema>>>;
+  acknowledgeGithubPushEvents(deliveryIds: string[]): Promise<void>;
 };
 
 function encrypt(value: string, key: Buffer) {
@@ -167,6 +235,10 @@ function decrypt(value: z.infer<typeof encryptedSecretSchema>, key: Buffer) {
 
 function normalizedDiscord(settings: StoredSettings) {
   return discordSettingsSchema.parse(settings.discord ?? {});
+}
+
+function normalizedGithub(settings: StoredSettings) {
+  return githubSettingsSchema.parse(settings.github ?? {});
 }
 
 function normalizedAnnouncements(discord: z.infer<typeof discordSettingsSchema>) {
@@ -486,6 +558,103 @@ export function createHubSettingsService(options: {
           item.key === announcementKey ? { ...item, lastSentYear: year } : item
         );
         return { ...settings, discord: { ...discord, announcements } };
+      });
+    },
+    async githubAdminView(repositories = []) {
+      const settings = await readSettings();
+      const github = normalizedGithub(settings);
+      const discord = normalizedDiscord(settings);
+      const configured = new Map(
+        github.repositories.map((repository) => [repository.fullName.toLowerCase(), repository]),
+      );
+      const available = new Map<string, z.infer<typeof githubRepositorySchema>>();
+      for (const repository of [...github.knownRepositories, ...repositories]) {
+        available.set(repository.fullName.toLowerCase(), repository);
+      }
+      for (const repository of github.repositories) {
+        if (!available.has(repository.fullName.toLowerCase())) {
+          available.set(repository.fullName.toLowerCase(), {
+            fullName: repository.fullName,
+            url: `https://github.com/${repository.fullName}`,
+            defaultBranch: "main",
+            private: true,
+          });
+        }
+      }
+      return {
+        webhookUrl: "https://api.legacyhosting.xyz/api/v1/integrations/github/webhook",
+        signatureRequired: true,
+        pendingEvents: github.pendingEvents.length,
+        channels: discord.channels,
+        repositories: Array.from(available.values())
+          .sort((left, right) => left.fullName.localeCompare(right.fullName))
+          .map((repository) => {
+            const selection = configured.get(repository.fullName.toLowerCase());
+            return {
+              ...repository,
+              enabled: selection?.enabled ?? false,
+              channelIds: selection?.channelIds ?? [],
+            };
+          }),
+      };
+    },
+    async saveGithubConfiguration(input) {
+      const repositories = z.array(githubRepositorySettingSchema).max(1_000).parse(input);
+      const names = repositories.map((repository) => repository.fullName.toLowerCase());
+      if (new Set(names).size !== names.length) throw new Error("duplicate_github_repository");
+      await mutate((settings) => {
+        const github = normalizedGithub(settings);
+        return { ...settings, github: { ...github, repositories } };
+      });
+    },
+    async ingestGithubPush(input) {
+      const event = githubPushEventSchema.omit({ channelIds: true }).parse(input);
+      let queued = false;
+      await mutate((settings) => {
+        const github = normalizedGithub(settings);
+        const known = new Map(
+          github.knownRepositories.map((repository) => [repository.fullName.toLowerCase(), repository]),
+        );
+        known.set(event.repository.fullName.toLowerCase(), {
+          ...event.repository,
+          lastEventAt: event.receivedAt,
+        });
+        const selection = github.repositories.find(
+          (repository) => repository.fullName.toLowerCase() === event.repository.fullName.toLowerCase(),
+        );
+        const duplicate = github.pendingEvents.some((pending) => pending.deliveryId === event.deliveryId);
+        const pendingEvents = selection?.enabled && selection.channelIds.length > 0 && !duplicate
+          ? [...github.pendingEvents, { ...event, channelIds: selection.channelIds }]
+          : github.pendingEvents;
+        queued = pendingEvents.length > github.pendingEvents.length;
+        return {
+          ...settings,
+          github: {
+            ...github,
+            knownRepositories: Array.from(known.values()),
+            pendingEvents,
+          },
+        };
+      });
+      return queued;
+    },
+    async githubPushEvents(limit = 25) {
+      const github = normalizedGithub(await readSettings());
+      return github.pendingEvents.slice(0, Math.max(1, Math.min(100, limit)));
+    },
+    async acknowledgeGithubPushEvents(deliveryIds) {
+      const acknowledged = new Set(
+        z.array(z.string().regex(/^[A-Za-z0-9-]{1,64}$/)).max(100).parse(deliveryIds),
+      );
+      await mutate((settings) => {
+        const github = normalizedGithub(settings);
+        return {
+          ...settings,
+          github: {
+            ...github,
+            pendingEvents: github.pendingEvents.filter((event) => !acknowledged.has(event.deliveryId)),
+          },
+        };
       });
     },
   };

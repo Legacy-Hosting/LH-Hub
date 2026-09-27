@@ -101,6 +101,39 @@ test("Hub settings encrypt Discord credentials and manage routing and maintenanc
     const publicEvents = await service.publicStatusEvents() as Array<{ status: string; components: string[] }>;
     assert.equal(publicEvents[0]?.status, "completed");
     assert.deepEqual(publicEvents[0]?.components, ["api"]);
+
+    await service.saveGithubConfiguration([{
+      fullName: "Legacy-Hosting/LH-Hub",
+      enabled: true,
+      channelIds: [channelId],
+    }]);
+    const githubEvent = (deliveryId: string, receivedAt: string) => ({
+      deliveryId,
+      repository: {
+        fullName: "Legacy-Hosting/LH-Hub",
+        url: "https://github.com/Legacy-Hosting/LH-Hub",
+        defaultBranch: "main",
+        private: true,
+      },
+      ref: "refs/heads/main",
+      branch: "main",
+      before: "a".repeat(40),
+      after: "b".repeat(40),
+      compareUrl: "https://github.com/Legacy-Hosting/LH-Hub/compare/a...b",
+      created: false,
+      deleted: false,
+      forced: false,
+      pusher: { name: "Angel", email: "angel@legacyhosting.xyz" },
+      sender: { login: "Angel", html_url: "https://github.com/Angel" },
+      headCommit: null,
+      commits: [],
+      receivedAt,
+    });
+    assert.equal(await service.ingestGithubPush(githubEvent("delivery-1", "2026-09-27T19:00:00.000Z")), true);
+    assert.equal(await service.ingestGithubPush(githubEvent("delivery-2", "2026-09-27T19:01:00.000Z")), true);
+    assert.deepEqual((await service.githubPushEvents()).map((event) => event.deliveryId), ["delivery-1", "delivery-2"]);
+    await service.acknowledgeGithubPushEvents(["delivery-1"]);
+    assert.deepEqual((await service.githubPushEvents()).map((event) => event.deliveryId), ["delivery-2"]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

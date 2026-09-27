@@ -25,13 +25,13 @@ test("only normalized SSO staff roles grant Hub access", () => {
 test("staff roles receive only their intended Hub capabilities", () => {
   for (const role of ["founder", "platform_admin"] as const) {
     const capabilities = capabilitiesFor({ roles: [role] });
-    assert.equal(capabilities.length, 9);
+    assert.equal(capabilities.length, 10);
     assert.equal(capabilities.includes("infrastructure:read"), true);
     assert.equal(capabilities.includes("discord:manage"), true);
     assert.equal(capabilities.includes("maintenance:write"), true);
     assert.equal(capabilities.includes("settings:write"), true);
   }
-  assert.equal(capabilitiesFor({ roles: ["management"] }).length, 8);
+  assert.equal(capabilitiesFor({ roles: ["management"] }).length, 9);
   assert.equal(capabilitiesFor({ roles: ["management"] }).includes("settings:write"), false);
 
   assert.deepEqual(capabilitiesFor({ roles: ["developer"] }), [

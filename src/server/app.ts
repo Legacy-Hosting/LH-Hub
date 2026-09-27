@@ -23,7 +23,8 @@ import {
   type FetchImplementation,
 } from "./service-health.js";
 import { HUB_VERSION } from "./version.js";
-import type { HubSettingsService } from "./settings.js";
+import { githubPushEventSchema, type HubSettingsService } from "./settings.js";
+import type { GitHubRepositoryReader } from "./github.js";
 
 export async function buildApp(options: {
   tokenVerifier?: TokenVerifier;
@@ -38,6 +39,8 @@ export async function buildApp(options: {
   publicStatusReader?: PublicStatusReader;
   settings?: HubSettingsService;
   discordServiceToken?: string;
+  apiServiceToken?: string;
+  githubRepositoryReader?: GitHubRepositoryReader;
 } = {}) {
   const app = Fastify({
     logger: env.NODE_ENV === "production",
@@ -91,6 +94,14 @@ export async function buildApp(options: {
 
   function validDiscordServiceToken(value: string | string[] | undefined) {
     const configured = options.discordServiceToken ?? env.HUB_DISCORD_SERVICE_TOKEN;
+    if (!configured || typeof value !== "string") return false;
+    const supplied = Buffer.from(value);
+    const expected = Buffer.from(configured);
+    return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  }
+
+  function validApiServiceToken(value: string | string[] | undefined) {
+    const configured = options.apiServiceToken ?? env.HUB_API_SERVICE_TOKEN;
     if (!configured || typeof value !== "string") return false;
     const supplied = Buffer.from(value);
     const expected = Buffer.from(configured);
@@ -427,6 +438,66 @@ export async function buildApp(options: {
     }
   });
 
+  app.get("/api/v1/github", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "github:manage")) {
+      return reply.status(403).send({ error: "github_management_required" });
+    }
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    let repositories: Awaited<ReturnType<GitHubRepositoryReader>> = [];
+    try {
+      repositories = await options.githubRepositoryReader?.() ?? [];
+    } catch (error) {
+      request.log.warn({ err: error }, "GitHub repository inventory could not be loaded");
+    }
+    return options.settings.githubAdminView(repositories);
+  });
+
+  app.put("/api/v1/github", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "github:manage")) {
+      return reply.status(403).send({ error: "github_management_required" });
+    }
+    if (!validBrowserOrigin(request.headers.origin)) return reply.status(403).send({ error: "invalid_origin" });
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    const body = z.object({
+      repositories: z.array(z.object({
+        fullName: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).max(255),
+        enabled: z.boolean(),
+        channelIds: z.array(z.string().regex(/^\d{17,20}$/)).max(20),
+      })).max(1_000),
+    }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_github_configuration" });
+    try {
+      await options.settings.saveGithubConfiguration(body.data.repositories);
+      let repositories: Awaited<ReturnType<GitHubRepositoryReader>> = [];
+      try {
+        repositories = await options.githubRepositoryReader?.() ?? [];
+      } catch {
+        repositories = [];
+      }
+      return options.settings.githubAdminView(repositories);
+    } catch {
+      return reply.status(400).send({ error: "invalid_github_configuration" });
+    }
+  });
+
+  app.post("/api/v1/internal/github/push", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!validApiServiceToken(request.headers["x-lh-hub-token"])) {
+      return reply.status(401).send({ error: "invalid_service_token" });
+    }
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    const body = githubPushEventSchema.omit({ channelIds: true }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_github_push" });
+    const queued = await options.settings.ingestGithubPush(body.data);
+    return reply.status(202).send({ accepted: true, queued });
+  });
+
   app.post("/api/v1/maintenance", async (request, reply) => {
     reply.header("Cache-Control", "no-store");
     const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
@@ -522,6 +593,29 @@ export async function buildApp(options: {
     }).safeParse(request.body);
     if (!body.success) return reply.status(400).send({ error: "invalid_announcement_receipt" });
     await options.settings.recordAnnouncementSent(body.data.key, body.data.year);
+    return reply.status(204).send();
+  });
+
+  app.get("/api/v1/internal/discord/github-events", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!validDiscordServiceToken(request.headers.authorization?.replace(/^Bearer\s+/i, ""))) {
+      return reply.status(401).send({ error: "invalid_service_token" });
+    }
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    return { events: await options.settings.githubPushEvents(25) };
+  });
+
+  app.post("/api/v1/internal/discord/github-events/ack", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    if (!validDiscordServiceToken(request.headers.authorization?.replace(/^Bearer\s+/i, ""))) {
+      return reply.status(401).send({ error: "invalid_service_token" });
+    }
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    const body = z.object({
+      deliveryIds: z.array(z.string().regex(/^[A-Za-z0-9-]{1,64}$/)).min(1).max(100),
+    }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_github_acknowledgement" });
+    await options.settings.acknowledgeGithubPushEvents(body.data.deliveryIds);
     return reply.status(204).send();
   });
 

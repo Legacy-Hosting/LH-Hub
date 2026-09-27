@@ -10,6 +10,7 @@ import { createHubOidcProtocol } from "./oidc-client.js";
 import { createAuditReader } from "./audit.js";
 import { createOperationsReader, createPublicStatusReader } from "./operations.js";
 import { createHubSettingsService } from "./settings.js";
+import { createGitHubRepositoryReader } from "./github.js";
 
 const tokenVerifier =
   env.SSO_ISSUER && env.SSO_JWKS_URL
@@ -74,6 +75,13 @@ const publicStatusReader = createPublicStatusReader({
   statusUrl: env.STATUS_API_URL,
   timeoutMs: env.SERVICE_HEALTH_TIMEOUT_MS,
 });
+const githubRepositoryReader = env.HUB_API_SERVICE_TOKEN
+  ? createGitHubRepositoryReader({
+      apiOrigin: env.API_ORIGIN,
+      serviceToken: env.HUB_API_SERVICE_TOKEN,
+      timeoutMs: env.API_REQUEST_TIMEOUT_MS,
+    })
+  : undefined;
 const app = await buildApp({
   ...(tokenVerifier ? { tokenVerifier } : {}),
   ...(browserAuth ? { browserAuth } : {}),
@@ -82,6 +90,8 @@ const app = await buildApp({
   auditReader,
   operationsReader,
   publicStatusReader,
+  ...(env.HUB_API_SERVICE_TOKEN ? { apiServiceToken: env.HUB_API_SERVICE_TOKEN } : {}),
+  ...(githubRepositoryReader ? { githubRepositoryReader } : {}),
   ...(settings ? { settings } : {}),
 });
 
