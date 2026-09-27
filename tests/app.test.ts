@@ -124,6 +124,7 @@ before(async () => {
       maintenanceView: async () => ({ services: [], maintenance: [] }),
       saveDiscordCredentials: async () => undefined,
       saveDiscordConfiguration: async () => undefined,
+      sendDiscordTest: async () => 8,
       createMaintenance: async () => undefined,
       finishMaintenance: async () => true,
       publicStatusEvents: async () => [],
@@ -152,7 +153,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-      version: "0.7.0",
+    version: "0.7.1",
   });
 });
 

@@ -20,6 +20,14 @@ export const discordServiceDefinitions = [
   { key: "status", name: "Status", server: "fra1-status-01", url: "https://status.legacyhosting.xyz/health" },
 ] as const;
 
+export const discordEventDefinitions = [
+  { key: "operational", name: "Operational / recovery", description: "A service has recovered and is operational." },
+  { key: "degraded", name: "Degraded", description: "A service is responding slowly or with reduced capacity." },
+  { key: "outage", name: "Outage", description: "A service is unavailable." },
+  { key: "maintenance", name: "Maintenance", description: "Scheduled maintenance has started." },
+  { key: "maintenanceComplete", name: "Maintenance complete", description: "Scheduled maintenance has been completed." },
+] as const;
+
 export const discordAssetUrls = {
   operational: "https://legacyhosting.xyz/assets/icons/Up.png",
   outage: "https://legacyhosting.xyz/assets/icons/Down.png",
@@ -60,6 +68,7 @@ const announcementDefaults = {
 } as const;
 
 const announcementKeySchema = z.enum(["birthday", "christmas", "newyear"]);
+const eventKeySchema = z.enum(["operational", "degraded", "outage", "maintenance", "maintenanceComplete"]);
 const announcementSchema = z.object({
   key: announcementKeySchema,
   enabled: z.boolean(),
@@ -90,9 +99,11 @@ const discordSettingsSchema = z.object({
     lastSeenAt: z.string().datetime(),
   }).optional(),
   serviceChannels: z.record(z.string(), channelIdsSchema).default({}),
+  eventChannels: z.record(z.string(), channelIdsSchema).default({}),
+  testChannelId: snowflakeSchema.optional(),
   announcements: z.array(announcementSchema).max(3).default([]),
   maintenance: z.array(maintenanceSchema).max(500).default([]),
-}).default({ channels: [], serviceChannels: {}, announcements: [], maintenance: [] });
+}).default({ channels: [], serviceChannels: {}, eventChannels: {}, announcements: [], maintenance: [] });
 
 const storedSettingsSchema = z.object({
   version: z.literal(1),
@@ -112,8 +123,11 @@ export type HubSettingsService = {
   saveDiscordCredentials(input: { botToken?: string; guildId: string }): Promise<void>;
   saveDiscordConfiguration(input: {
     serviceChannels: Record<string, string[]>;
+    eventChannels: Record<string, string[]>;
+    testChannelId?: string | undefined;
     announcements: Array<{ key: AnnouncementKey; enabled: boolean; title: string; message: string; channelIds: string[] }>;
   }): Promise<void>;
+  sendDiscordTest(channelId: string): Promise<number>;
   createMaintenance(input: {
     targetKey: "api" | "sso" | "hub" | "panel" | "status";
     title: string;
@@ -242,6 +256,11 @@ export function createHubSettingsService(options: {
         ...service,
         channelIds: discord.serviceChannels[service.key] ?? [],
       })),
+      events: discordEventDefinitions.map((event) => ({
+        ...event,
+        channelIds: discord.eventChannels[event.key] ?? [],
+      })),
+      testChannelId: discord.testChannelId ?? "",
       announcements: normalizedAnnouncements(discord),
       maintenance: discord.maintenance
         .map((item) => ({ ...item, status: maintenanceStatus(item) }))
@@ -319,8 +338,12 @@ export function createHubSettingsService(options: {
     },
     async saveDiscordConfiguration(input) {
       const allowedServices = new Set(discordServiceDefinitions.map((service) => service.key));
+      const allowedEvents = new Set(discordEventDefinitions.map((event) => event.key));
       if (Object.keys(input.serviceChannels).some((serviceKey) => !allowedServices.has(serviceKey as never))) {
         throw new Error("unknown_discord_service");
+      }
+      if (Object.keys(input.eventChannels).some((eventKey) => !allowedEvents.has(eventKey as never))) {
+        throw new Error("unknown_discord_event");
       }
       const announcements = z.array(announcementSchema.omit({ lastSentYear: true })).length(3).parse(input.announcements);
       await mutate((settings) => {
@@ -331,6 +354,8 @@ export function createHubSettingsService(options: {
           discord: {
             ...discord,
             serviceChannels: z.record(z.string(), channelIdsSchema).parse(input.serviceChannels),
+            eventChannels: z.record(eventKeySchema, channelIdsSchema).parse(input.eventChannels),
+            testChannelId: input.testChannelId ? snowflakeSchema.parse(input.testChannelId) : undefined,
             announcements: announcements.map((item) => ({
               ...item,
               ...(sentYears.get(item.key) ? { lastSentYear: sentYears.get(item.key) } : {}),
@@ -338,6 +363,50 @@ export function createHubSettingsService(options: {
           },
         };
       });
+    },
+    async sendDiscordTest(channelId) {
+      const settings = await readSettings();
+      const discord = normalizedDiscord(settings);
+      if (!discord.botToken || !discord.guildId) throw new Error("discord_not_configured");
+      if (!discord.channels.some((channel) => channel.id === channelId)) {
+        throw new Error("unknown_discord_channel");
+      }
+      const token = decrypt(discord.botToken, key);
+      const timestamp = new Date().toISOString();
+      const footer = { text: "Legacy Hosting · Test notification", icon_url: discordAssetUrls.logo };
+      const embeds = [
+        { title: "API is operational", description: "**Server:** ams3-api-01\n**Status:** operational\n**Response time:** 42 ms", color: 0x35d89a, thumbnail: { url: discordAssetUrls.operational } },
+        { title: "API is degraded", description: "**Server:** ams3-api-01\n**Status:** degraded\n**Response time:** 850 ms", color: 0xf3ae48, thumbnail: { url: discordAssetUrls.degraded } },
+        { title: "API is unavailable", description: "**Server:** ams3-api-01\n**Status:** outage\n**Response time:** No response", color: 0xef6170, thumbnail: { url: discordAssetUrls.outage } },
+        { title: "Scheduled maintenance", description: "This is a test of a maintenance notification.\n\n**Service:** API (ams3-api-01)", color: 0x7561ff, thumbnail: { url: discordAssetUrls.maintenance } },
+        { title: "Scheduled maintenance completed", description: "This is a test of a completed maintenance notification.\n\n**Status:** Maintenance complete", color: 0x35d89a, thumbnail: { url: discordAssetUrls.maintenanceComplete } },
+        ...Object.values(announcementDefaults).map((announcement) => ({
+          title: announcement.title,
+          description: announcement.message.replaceAll("{years}", String(new Date().getUTCFullYear() - 2017)),
+          color: 0x7561ff,
+          thumbnail: { url: announcement.imageUrl },
+        })),
+      ].map((embed) => ({ ...embed, footer, timestamp }));
+      const response = await fetchImplementation(
+        new URL(`/api/v10/channels/${channelId}/messages`, options.discordApiUrl ?? "https://discord.com"),
+        {
+          method: "POST",
+          headers: {
+            accept: "application/json",
+            authorization: `Bot ${token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            content: "**LH-Discord notification test** — these previews are only being sent to the configured test channel.",
+            embeds,
+            allowed_mentions: { parse: [] },
+          }),
+          redirect: "error",
+          signal: AbortSignal.timeout(options.timeoutMs),
+        },
+      );
+      if (!response.ok) throw new Error(`discord_test_rejected_${response.status}`);
+      return embeds.length;
     },
     async createMaintenance(input) {
       if (Date.parse(input.scheduledUntil) <= Date.parse(input.scheduledFor)) {

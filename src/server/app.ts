@@ -388,6 +388,8 @@ export async function buildApp(options: {
     const channelIds = z.array(z.string().regex(/^\d{17,20}$/)).max(20);
     const body = z.object({
       serviceChannels: z.record(z.string(), channelIds),
+      eventChannels: z.record(z.enum(["operational", "degraded", "outage", "maintenance", "maintenanceComplete"]), channelIds),
+      testChannelId: z.union([z.string().regex(/^\d{17,20}$/), z.literal("")]).optional(),
       announcements: z.array(z.object({
         key: z.enum(["birthday", "christmas", "newyear"]),
         enabled: z.boolean(),
@@ -402,6 +404,26 @@ export async function buildApp(options: {
       return options.settings.discordAdminView();
     } catch {
       return reply.status(400).send({ error: "invalid_discord_configuration" });
+    }
+  });
+
+  app.post("/api/v1/discord/test", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "discord:manage")) {
+      return reply.status(403).send({ error: "discord_management_required" });
+    }
+    if (!validBrowserOrigin(request.headers.origin)) return reply.status(403).send({ error: "invalid_origin" });
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    const body = z.object({ channelId: z.string().regex(/^\d{17,20}$/) }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_test_channel" });
+    try {
+      const sent = await options.settings.sendDiscordTest(body.data.channelId);
+      return { sent };
+    } catch {
+      request.log.warn("Discord test notification could not be sent");
+      return reply.status(400).send({ error: "discord_test_failed" });
     }
   });
 

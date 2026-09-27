@@ -435,6 +435,8 @@ function App() {
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({
           serviceChannels: Object.fromEntries(discordConfiguration.services.map((service) => [service.key, service.channelIds])),
+          eventChannels: Object.fromEntries(discordConfiguration.events.map((event) => [event.key, event.channelIds])),
+          testChannelId: discordConfiguration.testChannelId,
           announcements: discordConfiguration.announcements.map(({ key, enabled, title, message, channelIds }) => ({ key, enabled, title, message, channelIds })),
         }),
       });
@@ -443,6 +445,27 @@ function App() {
       setDiscordMessage("Discord channels and announcements were saved.");
     } catch (error) {
       setDiscordMessage(error instanceof Error ? error.message : "The Discord configuration could not be saved.");
+    } finally {
+      setDiscordBusy(false);
+    }
+  }
+
+  async function testDiscordNotifications() {
+    if (!discordConfiguration?.testChannelId) return;
+    setDiscordBusy(true);
+    setDiscordMessage("");
+    try {
+      const response = await fetch("/api/v1/discord/test", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ channelId: discordConfiguration.testChannelId }),
+      });
+      if (!response.ok) throw new Error("The Discord test could not be sent. Check the bot's channel permissions.");
+      const result = await response.json();
+      setDiscordMessage(`${result.sent} test notifications were sent to the selected test channel.`);
+    } catch (error) {
+      setDiscordMessage(error instanceof Error ? error.message : "The Discord test could not be sent.");
     } finally {
       setDiscordBusy(false);
     }
@@ -708,6 +731,7 @@ function App() {
               configuration={discordConfiguration}
               onChange={setDiscordConfiguration}
               onSave={saveDiscordConfiguration}
+              onTest={testDiscordNotifications}
               busy={discordBusy}
               message={discordMessage}
               navigate={navigate}

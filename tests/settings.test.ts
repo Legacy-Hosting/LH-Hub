@@ -37,6 +37,7 @@ test("Hub settings encrypt Discord credentials and manage routing and maintenanc
   const botToken = `discord.${"x".repeat(48)}`;
   const guildId = "123456789012345678";
   const channelId = "223456789012345678";
+  let sentTestEmbeds = 0;
   try {
     const service = createHubSettingsService({
       file,
@@ -44,6 +45,10 @@ test("Hub settings encrypt Discord credentials and manage routing and maintenanc
       timeoutMs: 5_000,
       fetchImplementation: async (_url, options) => {
         assert.equal(new Headers(options?.headers).get("authorization"), `Bot ${botToken}`);
+        if (options?.method === "POST") {
+          const payload = JSON.parse(String(options.body)) as { embeds: unknown[] };
+          sentTestEmbeds = payload.embeds.length;
+        }
         return Response.json({ id: guildId }, { status: 200 });
       },
     });
@@ -57,18 +62,24 @@ test("Hub settings encrypt Discord credentials and manage routing and maintenanc
       tokenConfigured: boolean;
       channels: Array<{ id: string }>;
       services: Array<{ key: string; channelIds: string[] }>;
+      events: Array<{ key: string; channelIds: string[] }>;
+      testChannelId: string;
       announcements: Array<{ key: "birthday" | "christmas" | "newyear"; title: string; message: string }>;
     };
     assert.equal(admin.tokenConfigured, true);
     assert.equal(admin.channels[0]?.id, channelId);
     await service.saveDiscordConfiguration({
       serviceChannels: Object.fromEntries(admin.services.map((item) => [item.key, [channelId]])),
+      eventChannels: Object.fromEntries(admin.events.map((item) => [item.key, [channelId]])),
+      testChannelId: channelId,
       announcements: admin.announcements.map((item) => ({
         ...item,
         enabled: true,
         channelIds: [channelId],
       })),
     });
+    assert.equal(await service.sendDiscordTest(channelId), 8);
+    assert.equal(sentTestEmbeds, 8);
     await service.createMaintenance({
       targetKey: "api",
       title: "API maintenance",
@@ -79,10 +90,12 @@ test("Hub settings encrypt Discord credentials and manage routing and maintenanc
     const bot = await service.discordBotConfiguration() as {
       botToken: string;
       services: Array<{ key: string; channelIds: string[] }>;
+      events: Array<{ key: string; channelIds: string[] }>;
       maintenance: Array<{ id: string }>;
     };
     assert.equal(bot.botToken, botToken);
     assert.deepEqual(bot.services.find((item) => item.key === "api")?.channelIds, [channelId]);
+    assert.deepEqual(bot.events.find((item) => item.key === "outage")?.channelIds, [channelId]);
     assert.equal(bot.maintenance.length, 1);
     assert.equal(await service.finishMaintenance(bot.maintenance[0]!.id, "complete"), true);
     const publicEvents = await service.publicStatusEvents() as Array<{ status: string; components: string[] }>;

@@ -5,7 +5,8 @@ import {
   CheckCircle2,
   RefreshCw,
   Save,
-  Server,
+  Send,
+  BellRing,
   Settings,
   ShieldCheck,
   Wrench,
@@ -32,6 +33,19 @@ function ChannelSelect({ channels, value, onChange, label }) {
           ? "Channels appear after the bot has connected to your Discord server."
           : "Use Ctrl/Cmd to select more than one channel."}
       </small>
+    </label>
+  );
+}
+
+function SingleChannelSelect({ channels, value, onChange, label }) {
+  return (
+    <label className="channel-field">
+      <span>{label}</span>
+      <select value={value ?? ""} onChange={(event) => onChange(event.target.value)} disabled={channels.length === 0}>
+        <option value="">Select a channel</option>
+        {channels.map((channel) => <option key={channel.id} value={channel.id}># {channel.name}</option>)}
+      </select>
+      <small>Test messages are sent only to this channel and never use the live event routes.</small>
     </label>
   );
 }
@@ -101,13 +115,13 @@ export function DiscordCredentialsCard({ configuration, busy, message, onSave })
   );
 }
 
-export function DiscordWorkspace({ configuration, onChange, onSave, busy, message, navigate }) {
+export function DiscordWorkspace({ configuration, onChange, onSave, onTest, busy, message, navigate }) {
   if (!configuration) {
     return <div className="operations-panel empty-state"><Bot size={26} /><p>Discord configuration is loading.</p></div>;
   }
-  const updateService = (key, channelIds) => onChange({
+  const updateEvent = (key, channelIds) => onChange({
     ...configuration,
-    services: configuration.services.map((service) => service.key === key ? { ...service, channelIds } : service),
+    events: configuration.events.map((event) => event.key === key ? { ...event, channelIds } : event),
   });
   const updateAnnouncement = (key, changes) => onChange({
     ...configuration,
@@ -137,16 +151,29 @@ export function DiscordWorkspace({ configuration, onChange, onSave, busy, messag
         </div>
       )}
 
-      <div className="section-title"><div><span>Notifications</span><h2>Service channels</h2></div><p>Select one or more channels for each service.</p></div>
+      <div className="discord-test-card">
+        <div className="discord-card-heading"><div className="workspace-icon"><Send size={20} /></div><div><h3>Test notifications</h3><p>Preview every status and announcement embed in one safe destination.</p></div></div>
+        <SingleChannelSelect
+          channels={configuration.channels}
+          value={configuration.testChannelId}
+          label="Test channel"
+          onChange={(testChannelId) => onChange({ ...configuration, testChannelId })}
+        />
+        <button className="secondary" type="button" disabled={busy || !configuration.connected || !configuration.testChannelId} onClick={onTest}>
+          {busy ? <RefreshCw className="spin" size={15} /> : <Send size={15} />}Test all notifications
+        </button>
+      </div>
+
+      <div className="section-title"><div><span>Notifications</span><h2>Event channels</h2></div><p>Choose separate destinations for each event type.</p></div>
       <div className="discord-service-grid">
-        {configuration.services.map((service) => (
-          <article className="discord-service-card" key={service.key}>
-            <div className="discord-card-heading"><div className="workspace-icon"><Server size={20} /></div><div><h3>{service.name}</h3><p>{service.server}</p></div></div>
+        {configuration.events.map((event) => (
+          <article className="discord-service-card" key={event.key}>
+            <div className="discord-card-heading"><div className="workspace-icon"><BellRing size={20} /></div><div><h3>{event.name}</h3><p>{event.description}</p></div></div>
             <ChannelSelect
               channels={configuration.channels}
-              value={service.channelIds}
-              label="Send status changes to"
-              onChange={(channelIds) => updateService(service.key, channelIds)}
+              value={event.channelIds}
+              label="Send this event to"
+              onChange={(channelIds) => updateEvent(event.key, channelIds)}
             />
           </article>
         ))}
