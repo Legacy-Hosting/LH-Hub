@@ -11,6 +11,27 @@ export const staffRoles = [
   "sales",
 ] as const;
 
+export const hubCapabilities = [
+  "services:read",
+  "infrastructure:read",
+  "operations:read",
+  "support:read",
+  "sales:read",
+] as const;
+
+export type StaffRole = (typeof staffRoles)[number];
+export type HubCapability = (typeof hubCapabilities)[number];
+
+const roleCapabilities: Record<StaffRole, readonly HubCapability[]> = {
+  founder: hubCapabilities,
+  management: hubCapabilities,
+  platform_admin: hubCapabilities,
+  developer: ["services:read", "infrastructure:read", "operations:read"],
+  infrastructure: ["services:read", "infrastructure:read", "operations:read"],
+  support: ["services:read", "support:read"],
+  sales: ["services:read", "sales:read"],
+};
+
 const claimsSchema = z.object({
   sub: z.string().min(1),
   name: z.string().min(1).max(160).optional(),
@@ -35,6 +56,19 @@ export function authorizeClaims(input: unknown): HubIdentity | null {
   const parsed = claimsSchema.safeParse(input);
   if (!parsed.success || parsed.data.roles.length === 0) return null;
   return parsed.data;
+}
+
+export function capabilitiesFor(identity: Pick<HubIdentity, "roles">) {
+  return Array.from(
+    new Set(identity.roles.flatMap((role) => roleCapabilities[role])),
+  );
+}
+
+export function hasCapability(
+  identity: Pick<HubIdentity, "roles">,
+  capability: HubCapability,
+) {
+  return capabilitiesFor(identity).includes(capability);
 }
 
 export function createOidcTokenVerifier(options: {

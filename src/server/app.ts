@@ -5,6 +5,8 @@ import Fastify from "fastify";
 import { z } from "zod";
 import {
   authorizeClaims,
+  capabilitiesFor,
+  hasCapability,
   readBearerToken,
   type HubIdentity,
   type LogoutTokenVerifier,
@@ -188,7 +190,7 @@ export async function buildApp(options: {
   app.get("/health", async () => ({
     status: "ok",
     service: "LH-Hub",
-    version: "0.3.1",
+    version: "0.4.0",
   }));
 
   app.get("/api/v1/session", async (request, reply) => {
@@ -200,7 +202,10 @@ export async function buildApp(options: {
     if ("error" in authorization) {
       return reply.status(authorization.statusCode).send({ error: authorization.error });
     }
-    return { user: authorization.identity };
+    return {
+      user: authorization.identity,
+      capabilities: capabilitiesFor(authorization.identity),
+    };
   });
 
   app.get("/api/v1/overview", async (request, reply) => {
@@ -226,6 +231,9 @@ export async function buildApp(options: {
     );
     if ("error" in authorization) {
       return reply.status(authorization.statusCode).send({ error: authorization.error });
+    }
+    if (!hasCapability(authorization.identity, "infrastructure:read")) {
+      return reply.status(403).send({ error: "insufficient_hub_access" });
     }
     if (!options.infrastructureReader) {
       return { state: "not_configured", fetchedAt: null, droplets: [] };

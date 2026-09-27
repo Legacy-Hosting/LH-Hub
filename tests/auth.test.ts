@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { authorizeClaims, readBearerToken } from "../src/server/auth.js";
+import {
+  authorizeClaims,
+  capabilitiesFor,
+  hasCapability,
+  readBearerToken,
+} from "../src/server/auth.js";
 
 test("bearer tokens are parsed without accepting other schemes", () => {
   assert.equal(readBearerToken("Bearer token-value"), "token-value");
@@ -15,4 +20,34 @@ test("only normalized SSO staff roles grant Hub access", () => {
   );
   assert.equal(authorizeClaims({ sub: "user-2", roles: [] }), null);
   assert.equal(authorizeClaims({ sub: "user-3", roles: ["customer"] }), null);
+});
+
+test("staff roles receive only their intended Hub capabilities", () => {
+  for (const role of ["founder", "management", "platform_admin"] as const) {
+    const capabilities = capabilitiesFor({ roles: [role] });
+    assert.equal(capabilities.length, 5);
+    assert.equal(capabilities.includes("infrastructure:read"), true);
+  }
+
+  for (const role of ["developer", "infrastructure"] as const) {
+    assert.deepEqual(capabilitiesFor({ roles: [role] }), [
+      "services:read",
+      "infrastructure:read",
+      "operations:read",
+    ]);
+  }
+
+  assert.deepEqual(capabilitiesFor({ roles: ["support"] }), [
+    "services:read",
+    "support:read",
+  ]);
+  assert.deepEqual(capabilitiesFor({ roles: ["sales"] }), [
+    "services:read",
+    "sales:read",
+  ]);
+  assert.equal(hasCapability({ roles: ["support"] }, "infrastructure:read"), false);
+  assert.equal(
+    hasCapability({ roles: ["support", "infrastructure"] }, "infrastructure:read"),
+    true,
+  );
 });

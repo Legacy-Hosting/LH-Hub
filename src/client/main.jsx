@@ -12,6 +12,7 @@ import {
   Network,
   Server,
   ShieldCheck,
+  ShoppingBag,
   Users,
 } from "lucide-react";
 import "./styles.css";
@@ -21,6 +22,14 @@ const staffAreas = [
   { icon: Activity, title: "Operations", text: "Incidents, deployments, backups, and alerts." },
   { icon: Users, title: "Customer support", text: "Audited support context through LH-API." },
   { icon: Gauge, title: "Capacity", text: "Resource trends without exposing provider tokens." },
+];
+
+const navigation = [
+  { capability: "services:read", icon: Gauge, label: "Overview", active: true },
+  { capability: "infrastructure:read", icon: Server, label: "Infrastructure" },
+  { capability: "operations:read", icon: Activity, label: "Operations" },
+  { capability: "support:read", icon: Users, label: "Support" },
+  { capability: "sales:read", icon: ShoppingBag, label: "Sales" },
 ];
 
 function greeting(date) {
@@ -54,7 +63,11 @@ async function jsonResponse(url) {
 function App() {
   const [now, setNow] = useState(new Date());
   const [health, setHealth] = useState("checking");
-  const [auth, setAuth] = useState({ state: "checking", user: null });
+  const [auth, setAuth] = useState({
+    state: "checking",
+    user: null,
+    capabilities: [],
+  });
   const [services, setServices] = useState([]);
   const [infrastructure, setInfrastructure] = useState({
     state: "loading",
@@ -73,12 +86,15 @@ function App() {
       .then(() => active && setHealth("online"))
       .catch(() => active && setHealth("unavailable"));
 
-    async function refreshOperationalData() {
+    async function refreshOperationalData(capabilities) {
       if (refreshing) return;
       refreshing = true;
+      const canViewInfrastructure = capabilities.includes("infrastructure:read");
       const [overviewResult, infrastructureResult] = await Promise.allSettled([
         jsonResponse("/api/v1/overview"),
-        jsonResponse("/api/v1/infrastructure"),
+        canViewInfrastructure
+          ? jsonResponse("/api/v1/infrastructure")
+          : Promise.resolve(null),
       ]);
       if (active) {
         if (overviewResult.status === "fulfilled") {
@@ -86,9 +102,13 @@ function App() {
             ? overviewResult.value.services
             : []);
         }
-        if (infrastructureResult.status === "fulfilled") {
+        if (
+          canViewInfrastructure &&
+          infrastructureResult.status === "fulfilled" &&
+          infrastructureResult.value
+        ) {
           setInfrastructure(infrastructureResult.value);
-        } else {
+        } else if (canViewInfrastructure) {
           setInfrastructure((current) => ({
             ...current,
             state: current.droplets.length > 0 ? "stale" : "unavailable",
@@ -105,17 +125,27 @@ function App() {
           headers: { accept: "application/json" },
         });
         if (response.status === 401) {
-          if (active) setAuth({ state: "guest", user: null });
+          if (active) setAuth({ state: "guest", user: null, capabilities: [] });
           return;
         }
         if (!response.ok) throw new Error("session unavailable");
         const session = await response.json();
         if (!active) return;
-        setAuth({ state: "authenticated", user: session.user });
-        await refreshOperationalData();
-        if (active) refreshTimer = setInterval(refreshOperationalData, 60_000);
+        const capabilities = Array.isArray(session.capabilities)
+          ? session.capabilities
+          : [];
+        setAuth({ state: "authenticated", user: session.user, capabilities });
+        await refreshOperationalData(capabilities);
+        if (active) {
+          refreshTimer = setInterval(
+            () => refreshOperationalData(capabilities),
+            60_000,
+          );
+        }
       } catch {
-        if (active) setAuth({ state: "unavailable", user: null });
+        if (active) {
+          setAuth({ state: "unavailable", user: null, capabilities: [] });
+        }
       }
     }
     void loadSession();
@@ -135,16 +165,21 @@ function App() {
   );
   const displayName = auth.user?.name?.split(" ")[0] || "Legacy Hosting";
   const authenticated = auth.state === "authenticated";
+  const canViewInfrastructure = auth.capabilities.includes("infrastructure:read");
+  const visibleNavigation = authenticated
+    ? navigation.filter((item) => auth.capabilities.includes(item.capability))
+    : navigation.slice(0, 1);
 
   return (
     <div className="shell">
       <aside>
         <div className="brand"><span>L</span><div><strong>Legacy Hosting</strong><small>Staff Hub</small></div></div>
         <nav aria-label="Hub navigation">
-          <button className="active"><Gauge size={18} />Overview</button>
-          <button disabled><Server size={18} />Infrastructure</button>
-          <button disabled><Activity size={18} />Operations</button>
-          <button disabled><Users size={18} />Support</button>
+          {visibleNavigation.map(({ active, icon: Icon, label }) => (
+            <button className={active ? "active" : undefined} disabled={!active} key={label}>
+              <Icon size={18} />{label}
+            </button>
+          ))}
         </nav>
         <div className="guard"><ShieldCheck size={18} /><span>Protected by LH-SSO</span></div>
       </aside>
@@ -183,7 +218,7 @@ function App() {
             })}
           </div>
 
-          {authenticated && (
+          {authenticated && canViewInfrastructure && (
             <>
               <div className="section-title infrastructure-title">
                 <div><span>Infrastructure</span><h2>Droplet capacity</h2></div>
@@ -215,7 +250,7 @@ function App() {
             </>
           )}
         </section>
-        <footer><span>LH-Hub v0.3.1</span><span>{clock}</span></footer>
+        <footer><span>LH-Hub v0.4.0</span><span>{clock}</span></footer>
       </main>
     </div>
   );

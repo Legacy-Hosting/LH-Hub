@@ -12,6 +12,8 @@ Only a verified access token containing an allowlisted staff role creates a brow
 
 The infrastructure view reads Droplet metadata and DigitalOcean Insights only on the Hub server. Use a custom DigitalOcean token with `monitoring:read` and its required read scopes, including `droplet:read`, `regions:read`, `sizes:read`, `actions:read`, `image:read`, and `snapshot:read`. The token is never returned to the browser. Metrics are cached for two minutes by default, concurrent refreshes are deduplicated, and provider failures fall back to the last successful snapshot.
 
+Hub access is capability-based after SSO authentication. Founder, Management, and Administrator receive every Hub view. Developer and Infrastructure receive service, infrastructure, and operations views. Support receives service and support views, while Sales receives service and sales views. Sensitive infrastructure endpoints enforce the same matrix server-side, so hiding a navigation item is never the security boundary.
+
 ## Development
 
 ```bash

@@ -12,6 +12,8 @@ before(async () => {
     tokenVerifier: async (token) =>
       token === "staff-token"
         ? { sub: "user-1", name: "Support", roles: ["support"] }
+        : token === "infrastructure-token"
+          ? { sub: "user-3", name: "Infrastructure", roles: ["infrastructure"] }
         : { sub: "user-2", roles: [] },
     browserAuth: {
       begin: async () => ({
@@ -71,7 +73,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-    version: "0.3.1",
+    version: "0.4.0",
   });
 });
 
@@ -93,6 +95,7 @@ test("Hub APIs require an SSO bearer token and a staff role", async () => {
   });
   assert.equal(staff.statusCode, 200);
   assert.deepEqual(staff.json().user.roles, ["support"]);
+  assert.deepEqual(staff.json().capabilities, ["services:read", "support:read"]);
 
   const browserSession = await app.inject({
     method: "GET",
@@ -165,10 +168,18 @@ test("service checks run server-side for authorized staff", async () => {
   assert.equal(response.json().services.length, 4);
   assert.ok(response.json().services.every((service: { state: string }) => service.state === "operational"));
 
-  const infrastructure = await app.inject({
+  const deniedInfrastructure = await app.inject({
     method: "GET",
     url: "/api/v1/infrastructure",
     headers: { authorization: "Bearer staff-token" },
+  });
+  assert.equal(deniedInfrastructure.statusCode, 403);
+  assert.equal(deniedInfrastructure.json().error, "insufficient_hub_access");
+
+  const infrastructure = await app.inject({
+    method: "GET",
+    url: "/api/v1/infrastructure",
+    headers: { authorization: "Bearer infrastructure-token" },
   });
   assert.equal(infrastructure.statusCode, 200);
   assert.equal(infrastructure.json().state, "ready");
