@@ -28,6 +28,26 @@ before(async () => {
     hubOrigin: "https://hub.legacyhosting.xyz",
     secureCookies: true,
     fetchImplementation: async () => new Response("ok", { status: 200 }),
+    infrastructureReader: async () => ({
+      state: "ready",
+      fetchedAt: "2026-09-27T09:00:00.000Z",
+      droplets: [{
+        name: "ams3-hub-01",
+        status: "active",
+        region: "ams3",
+        vcpus: 1,
+        memoryMiB: 1024,
+        diskGiB: 25,
+        metricsState: "ready",
+        metricsUpdatedAt: "2026-09-27T08:59:00.000Z",
+        cpuPercent: 4.2,
+        memoryPercent: 21.5,
+        diskPercent: 12.1,
+        load1: 0.08,
+        publicBandwidthInMbps: 0.3,
+        publicBandwidthOutMbps: 0.1,
+      }],
+    }),
   });
 });
 
@@ -41,7 +61,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-    version: "0.2.0",
+    version: "0.3.0",
   });
 });
 
@@ -114,4 +134,14 @@ test("service checks run server-side for authorized staff", async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(response.json().services.length, 4);
   assert.ok(response.json().services.every((service: { state: string }) => service.state === "operational"));
+
+  const infrastructure = await app.inject({
+    method: "GET",
+    url: "/api/v1/infrastructure",
+    headers: { authorization: "Bearer staff-token" },
+  });
+  assert.equal(infrastructure.statusCode, 200);
+  assert.equal(infrastructure.json().state, "ready");
+  assert.equal(infrastructure.json().droplets[0].name, "ams3-hub-01");
+  assert.equal(JSON.stringify(infrastructure.json()).includes("token"), false);
 });

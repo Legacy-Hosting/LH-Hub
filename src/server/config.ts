@@ -36,6 +36,25 @@ const schema = z
       .min(500)
       .max(15_000)
       .default(5_000),
+    DIGITALOCEAN_TOKEN: z.string().min(32).regex(/^\S+$/).optional(),
+    DIGITALOCEAN_REQUEST_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(15_000)
+      .default(5_000),
+    DIGITALOCEAN_CACHE_TTL_MS: z.coerce
+      .number()
+      .int()
+      .min(60_000)
+      .max(900_000)
+      .default(120_000),
+    DIGITALOCEAN_METRIC_WINDOW_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(600)
+      .max(86_400)
+      .default(900),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV !== "production") return;
@@ -46,6 +65,7 @@ const schema = z
       "SSO_CLIENT_SECRET",
       "SSO_REDIRECT_URI",
       "SSO_RESOURCE",
+      "DIGITALOCEAN_TOKEN",
     ] as const) {
       if (!value[field]) {
         context.addIssue({
@@ -60,6 +80,13 @@ const schema = z
         code: "custom",
         path: ["HOST"],
         message: "LH-Hub must listen on the local reverse-proxy interface",
+      });
+    }
+    if (value.DIGITALOCEAN_TOKEN?.includes("replace-with")) {
+      context.addIssue({
+        code: "custom",
+        path: ["DIGITALOCEAN_TOKEN"],
+        message: "DIGITALOCEAN_TOKEN must be a real scoped token",
       });
     }
     if (

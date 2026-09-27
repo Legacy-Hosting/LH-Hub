@@ -8,6 +8,8 @@ The Hub uses LH-SSO Authorization Code Flow with PKCE through a backend-for-fron
 
 Only a verified access token containing an allowlisted staff role creates a browser session. The token is refreshed server-side before expiry so role changes and SSO revocation are enforced without exposing tokens to React. The Hub keeps bearer-token support for authenticated service access.
 
+The infrastructure view reads Droplet metadata and DigitalOcean Insights only on the Hub server. Use a custom DigitalOcean token with `monitoring:read` and its required read scopes, including `droplet:read`, `regions:read`, `sizes:read`, `actions:read`, `image:read`, and `snapshot:read`. The token is never returned to the browser. Metrics are cached for two minutes by default, concurrent refreshes are deduplicated, and provider failures fall back to the last successful snapshot.
+
 ## Development
 
 ```bash

@@ -12,11 +12,14 @@ if (( (8#$permissions & 077) != 0 )); then
   exit 1
 fi
 set -a
+# The protected environment path is an operator argument.
+# shellcheck disable=SC1090
 . "$environment_file"
 set +a
 required=(NODE_ENV HOST PORT SSO_ISSUER SSO_AUDIENCE SSO_JWKS_URL SSO_CLIENT_ID \
   SSO_CLIENT_SECRET SSO_REDIRECT_URI SSO_RESOURCE SSO_REQUEST_TIMEOUT_MS HUB_ORIGIN HUB_SESSION_TTL_SECONDS \
-  SERVICE_HEALTH_TARGETS)
+  SERVICE_HEALTH_TARGETS DIGITALOCEAN_TOKEN DIGITALOCEAN_REQUEST_TIMEOUT_MS \
+  DIGITALOCEAN_CACHE_TTL_MS DIGITALOCEAN_METRIC_WINDOW_SECONDS)
 for name in "${required[@]}"; do
   if [[ -z ${!name:-} ]]; then
     echo "Missing Hub setting: $name" >&2
@@ -37,6 +40,10 @@ if [[ ${#SSO_CLIENT_SECRET} -lt 32 ]]; then
   echo "SSO_CLIENT_SECRET must contain at least 32 characters" >&2
   exit 1
 fi
+if [[ ${#DIGITALOCEAN_TOKEN} -lt 32 || $DIGITALOCEAN_TOKEN == *replace-with* ]]; then
+  echo "DIGITALOCEAN_TOKEN must be a real scoped read-only token" >&2
+  exit 1
+fi
 if [[ $SSO_REDIRECT_URI != "${HUB_ORIGIN%/}/auth/callback" ]]; then
   echo "SSO_REDIRECT_URI must use HUB_ORIGIN and /auth/callback" >&2
   exit 1
@@ -49,6 +56,21 @@ fi
 if [[ ! $SSO_REQUEST_TIMEOUT_MS =~ ^[0-9]+$ ]] || \
    (( SSO_REQUEST_TIMEOUT_MS < 1000 || SSO_REQUEST_TIMEOUT_MS > 15000 )); then
   echo "SSO_REQUEST_TIMEOUT_MS must be between 1000 and 15000" >&2
+  exit 1
+fi
+if [[ ! $DIGITALOCEAN_REQUEST_TIMEOUT_MS =~ ^[0-9]+$ ]] || \
+   (( DIGITALOCEAN_REQUEST_TIMEOUT_MS < 1000 || DIGITALOCEAN_REQUEST_TIMEOUT_MS > 15000 )); then
+  echo "DIGITALOCEAN_REQUEST_TIMEOUT_MS must be between 1000 and 15000" >&2
+  exit 1
+fi
+if [[ ! $DIGITALOCEAN_CACHE_TTL_MS =~ ^[0-9]+$ ]] || \
+   (( DIGITALOCEAN_CACHE_TTL_MS < 60000 || DIGITALOCEAN_CACHE_TTL_MS > 900000 )); then
+  echo "DIGITALOCEAN_CACHE_TTL_MS must be between 60000 and 900000" >&2
+  exit 1
+fi
+if [[ ! $DIGITALOCEAN_METRIC_WINDOW_SECONDS =~ ^[0-9]+$ ]] || \
+   (( DIGITALOCEAN_METRIC_WINDOW_SECONDS < 600 || DIGITALOCEAN_METRIC_WINDOW_SECONDS > 86400 )); then
+  echo "DIGITALOCEAN_METRIC_WINDOW_SECONDS must be between 600 and 86400" >&2
   exit 1
 fi
 if ! node -e 'const issuer=new URL(process.env.SSO_ISSUER); const jwks=new URL(process.env.SSO_JWKS_URL); const hub=new URL(process.env.HUB_ORIGIN); const resource=new URL(process.env.SSO_RESOURCE); if(jwks.origin!==issuer.origin||resource.origin!==hub.origin) process.exit(1)'; then

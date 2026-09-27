@@ -2,6 +2,7 @@ import { buildApp } from "./app.js";
 import { createOidcTokenVerifier } from "./auth.js";
 import { createBrowserAuth } from "./browser-auth.js";
 import { env } from "./config.js";
+import { createDigitalOceanInfrastructureReader } from "./digitalocean.js";
 import { createHubOidcProtocol } from "./oidc-client.js";
 
 const tokenVerifier =
@@ -30,9 +31,16 @@ const browserAuth = tokenVerifier && env.SSO_ISSUER && env.SSO_CLIENT_ID &&
       }),
     })
   : undefined;
+const infrastructureReader = createDigitalOceanInfrastructureReader({
+  ...(env.DIGITALOCEAN_TOKEN ? { token: env.DIGITALOCEAN_TOKEN } : {}),
+  timeoutMs: env.DIGITALOCEAN_REQUEST_TIMEOUT_MS,
+  cacheMs: env.DIGITALOCEAN_CACHE_TTL_MS,
+  metricWindowSeconds: env.DIGITALOCEAN_METRIC_WINDOW_SECONDS,
+});
 const app = await buildApp({
   ...(tokenVerifier ? { tokenVerifier } : {}),
   ...(browserAuth ? { browserAuth } : {}),
+  infrastructureReader,
 });
 
 const shutdown = async (signal: string) => {
