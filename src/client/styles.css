@@ -137,6 +137,27 @@ h1 { font-size: clamp(22px, 2.3vw, 30px); margin-top: 6px; }
 .infrastructure-panel td small.ready { color: #55dda3; margin-top: 6px; }
 .infrastructure-panel td small.partial { color: #e7b35f; margin-top: 6px; }
 .infrastructure-panel td small.unavailable { color: #ff7c88; margin-top: 6px; }
+.status-component-manager { margin-top: 42px; }
+.status-component-manager > .section-title { margin-top: 0; }
+.status-layout-note { margin-bottom: 20px; border: 1px solid #35304e; border-radius: 12px; padding: 16px 18px; display: flex; align-items: center; gap: 13px; color: #a99aff; background: linear-gradient(135deg, #181724, #131419); }
+.status-layout-note strong { display: block; color: #e9eaf2; font-size: 12px; }
+.status-layout-note p { margin-top: 4px; color: #9296a5; font-size: 11px; line-height: 1.5; }
+.status-server-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.status-server-grid > article { min-width: 0; border: 1px solid var(--border); border-radius: 14px; padding: 21px; background: var(--surface); }
+.status-server-grid > article.primary-service { border-color: #3b3565; background: linear-gradient(145deg, #171623, #131419); }
+.status-server-grid > article.primary-service .drag-handle { cursor: grab; color: #a99aff; }
+.status-server-grid > article.primary-service .drag-handle:active { cursor: grabbing; }
+.status-server-heading { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; }
+.status-server-heading .drag-handle { color: #555968; }
+.status-server-heading strong, .status-server-heading small { display: block; }
+.status-server-heading strong { font-size: 13px; }
+.status-server-heading small { margin-top: 4px; color: #737786; font-size: 9px; }
+.status-server-flags { margin-top: 17px; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #7d8190; font-size: 10px; }
+.status-server-flags label { display: inline-flex; align-items: center; gap: 7px; color: #bbb4ed; cursor: pointer; }
+.status-server-flags input { accent-color: #7561ff; }
+.status-metadata-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 82px; gap: 10px; }
+.status-metadata-grid .token-field { min-width: 0; }
+.status-component-manager .token-field small { color: #737786; font-size: 9px; line-height: 1.45; }
 .audit-title { margin-top: 48px; }
 .audit-panel { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: hidden; }
 .audit-list { list-style: none; padding: 0; margin: 0; }
@@ -195,7 +216,15 @@ h1 { font-size: clamp(22px, 2.3vw, 30px); margin-top: 6px; }
 .github-repository-head a:hover { color: #a99dff; }
 .github-repository-head p { margin-top: 5px; display: flex; align-items: center; gap: 5px; color: #7f8391; font-size: 10px; }
 .github-repository-grid time { display: block; margin-top: 13px; color: #747887; font-size: 9px; }
-.github-message { text-align: right; }
+.github-error-state { gap: 14px; text-align: center; }
+.github-error-state svg { color: #e7b35f; }
+.configuration-save-prompt { position: fixed; right: 28px; bottom: 64px; z-index: 80; width: min(370px, calc(100vw - 40px)); border: 1px solid #494171; border-radius: 14px; padding: 16px; background: #171822; box-shadow: 0 22px 65px rgba(0, 0, 0, .52); }
+.configuration-save-prompt > div { margin-bottom: 14px; }
+.configuration-save-prompt strong { display: block; font-family: "Space Grotesk", sans-serif; font-size: 14px; }
+.configuration-save-prompt p { margin-top: 5px; color: #9296a5; font-size: 11px; line-height: 1.45; }
+.configuration-save-prompt .github-message { margin: 0 0 12px; color: #ff8994; }
+.configuration-save-prompt .primary { width: 100%; border: 0; cursor: pointer; }
+.configuration-save-prompt .primary:disabled { cursor: wait; opacity: .65; }
 .discord-title { margin-top: 0; }
 .discord-notice { grid-template-columns: auto minmax(0, 1fr) auto; margin-bottom: 10px; }
 .discord-service-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
@@ -256,6 +285,7 @@ footer a { color: #7561ff; text-decoration: none; }
   .announcement-grid { grid-template-columns: 1fr; }
   .discord-test-card { grid-template-columns: 1fr; align-items: stretch; }
   .maintenance-layout { grid-template-columns: 1fr; }
+  .status-server-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
   .auth-gate { padding: 20px; }
@@ -283,7 +313,9 @@ footer a { color: #7561ff; text-decoration: none; }
   .provider-settings-head { grid-template-columns: auto minmax(0, 1fr); }
   .provider-settings-head > b { grid-column: 2; justify-self: start; }
   .settings-field-grid, .discord-service-grid { grid-template-columns: 1fr; }
+  .status-metadata-grid { grid-template-columns: 1fr; }
   .github-repository-grid { grid-template-columns: 1fr; }
+  .configuration-save-prompt { right: 16px; bottom: 58px; width: calc(100vw - 32px); }
   .discord-notice { display: block; }
   .discord-notice .primary { margin-top: 18px; }
   .maintenance-list > article { align-items: stretch; flex-direction: column; }

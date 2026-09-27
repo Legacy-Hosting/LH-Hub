@@ -211,7 +211,8 @@ export function MaintenanceWorkspace({ data, busy, message, onCreate, onFinish }
     const end = new Date(start.getTime() + 60 * 60_000);
     return { start: localInputValue(start), end: localInputValue(end) };
   }, []);
-  const [targetKey, setTargetKey] = useState("api");
+  const [targetKeys, setTargetKeys] = useState(["api"]);
+  const [impact, setImpact] = useState("none");
   const [title, setTitle] = useState("");
   const [maintenanceMessage, setMaintenanceMessage] = useState("");
   const [scheduledFor, setScheduledFor] = useState(defaults.start);
@@ -226,7 +227,8 @@ export function MaintenanceWorkspace({ data, busy, message, onCreate, onFinish }
           onSubmit={(event) => {
             event.preventDefault();
             void onCreate({
-              targetKey,
+              targetKeys,
+              impact,
               title,
               message: maintenanceMessage,
               scheduledFor: new Date(scheduledFor).toISOString(),
@@ -239,8 +241,23 @@ export function MaintenanceWorkspace({ data, busy, message, onCreate, onFinish }
               .catch(() => undefined);
           }}
         >
-          <div className="discord-card-heading"><div className="workspace-icon"><Wrench size={20} /></div><div><h3>Schedule maintenance</h3><p>Choose the affected server or service.</p></div></div>
-          <label className="token-field"><span>Service</span><select value={targetKey} onChange={(event) => setTargetKey(event.target.value)}>{data?.services?.map((service) => <option value={service.key} key={service.key}>{service.name} · {service.server}</option>)}</select></label>
+          <div className="discord-card-heading"><div className="workspace-icon"><Wrench size={20} /></div><div><h3>Schedule maintenance</h3><p>Choose every affected service and the expected impact.</p></div></div>
+          <label className="channel-field maintenance-targets">
+            <span>Affected services</span>
+            <select multiple value={targetKeys} onChange={(event) => setTargetKeys(selectedValues(event))}>
+              {data?.services?.map((service) => <option value={service.key} key={service.key}>{service.name} · {service.server}</option>)}
+            </select>
+            <small>Status-change notifications for these services are paused during the active maintenance window.</small>
+          </label>
+          <label className="token-field">
+            <span>Impact</span>
+            <select value={impact} onChange={(event) => setImpact(event.target.value)}>
+              <option value="none">None</option>
+              <option value="minor">Minor</option>
+              <option value="major">Major</option>
+              <option value="critical">Critical</option>
+            </select>
+          </label>
           <label className="token-field"><span>Title</span><input minLength="3" maxLength="120" value={title} onChange={(event) => setTitle(event.target.value)} required /></label>
           <label className="token-field"><span>Message</span><textarea minLength="3" maxLength="1000" value={maintenanceMessage} onChange={(event) => setMaintenanceMessage(event.target.value)} required /></label>
           <div className="settings-field-grid">
@@ -248,13 +265,13 @@ export function MaintenanceWorkspace({ data, busy, message, onCreate, onFinish }
             <label className="token-field"><span>Ends</span><input type="datetime-local" value={scheduledUntil} onChange={(event) => setScheduledUntil(event.target.value)} required /></label>
           </div>
           {message && <p className="settings-message" role="status">{message}</p>}
-          <div className="provider-actions"><button className="primary" type="submit" disabled={busy || title.length < 3 || maintenanceMessage.length < 3}><CalendarClock size={15} />Schedule maintenance</button></div>
+          <div className="provider-actions"><button className="primary" type="submit" disabled={busy || targetKeys.length === 0 || title.length < 3 || maintenanceMessage.length < 3}><CalendarClock size={15} />Schedule maintenance</button></div>
         </form>
         <div className="maintenance-list">
           <div className="panel-heading"><div><span>Maintenance history</span><h3>Scheduled and recent</h3></div><small>{data?.maintenance?.length ?? 0} entries</small></div>
           {!data?.maintenance?.length ? <div className="empty-state compact"><CheckCircle2 size={22} /><p>No maintenance has been scheduled.</p></div> : data.maintenance.map((item) => (
             <article key={item.id}>
-              <div><span className={`maintenance-status ${item.status}`}>{item.status.replaceAll("_", " ")}</span><h4>{item.title}</h4><p>{item.message}</p><small>{item.targetKey.toUpperCase()} · {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.scheduledFor))}</small></div>
+              <div><span className={`maintenance-status ${item.status}`}>{item.status.replaceAll("_", " ")}</span><h4>{item.title}</h4><p>{item.message}</p><small>{item.targetKeys.map((key) => key.toUpperCase()).join(", ")} · {item.impact} impact · {new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.scheduledFor))}</small></div>
               {["scheduled", "in_progress"].includes(item.status) && <div className="maintenance-actions"><button className="secondary" type="button" onClick={() => onFinish(item.id, "cancel")}>Cancel</button><button className="primary" type="button" onClick={() => onFinish(item.id, "complete")}>Complete</button></div>}
             </article>
           ))}

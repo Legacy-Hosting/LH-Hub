@@ -7,6 +7,24 @@ let app: FastifyInstance;
 let loggedOutToken: string | undefined;
 let revokedSubject: string | undefined;
 let storedDigitalOceanToken: string | undefined;
+let visibleGithubOwner = "";
+let createdMaintenance: { targetKeys: string[]; impact: string } | undefined;
+let storedStatusComponents: Array<Record<string, unknown>> = [];
+
+const githubRepositories = [
+  {
+    fullName: "Legacy-Hosting/LH-Hub",
+    url: "https://github.com/Legacy-Hosting/LH-Hub",
+    defaultBranch: "main",
+    private: true,
+  },
+  {
+    fullName: "Angel/Private-Tool",
+    url: "https://github.com/Angel/Private-Tool",
+    defaultBranch: "main",
+    private: true,
+  },
+];
 
 before(async () => {
   app = await buildApp({
@@ -108,6 +126,7 @@ before(async () => {
       components: [],
       events: [],
     }),
+    githubRepositoryReader: async () => githubRepositories,
     settings: {
       digitalOceanToken: async () => storedDigitalOceanToken,
       digitalOceanStatus: async () => ({
@@ -120,12 +139,53 @@ before(async () => {
       clearDigitalOceanToken: async () => {
         storedDigitalOceanToken = undefined;
       },
+      statusComponentAdminView: async (servers = []) => ({
+        components: storedStatusComponents.length > 0
+          ? storedStatusComponents
+          : servers.map((server, index) => ({
+              server: server.name,
+              componentKey: index === 0 ? "hub" : `service-${index}`,
+              visible: false,
+              primary: false,
+              displayName: "Staff Hub",
+              datacenter: "Amsterdam 3",
+              service: "Hub",
+              number: "01",
+              primaryOrder: 0,
+              publicUrl: "https://hub.legacyhosting.xyz/health",
+              originFqdn: "ams3.hub-01.legacyh.fyi",
+            })),
+        datacenters: ["Amsterdam 3"],
+        services: ["Hub"],
+      }),
+      saveStatusComponents: async (components) => {
+        storedStatusComponents = components.map((component, index) => ({
+          ...component,
+          componentKey: component.server === "ams3-hub-01" ? "hub" : `service-${index}`,
+          primaryOrder: component.primary ? index : 0,
+        }));
+      },
+      publicStatusComponents: async () => storedStatusComponents
+        .filter((component) => component.visible)
+        .map((component) => ({
+          key: component.componentKey,
+          name: component.displayName,
+          url: component.publicUrl,
+          connectHostname: component.originFqdn,
+          primary: component.primary,
+          datacenter: component.datacenter,
+          service: component.service,
+          number: component.number,
+          order: component.primaryOrder,
+        })),
       discordAdminView: async () => ({ configured: false, services: [], announcements: [], maintenance: [] }),
-      maintenanceView: async () => ({ services: [], maintenance: [] }),
+      maintenanceView: async () => ({ services: [], maintenance: createdMaintenance ? [createdMaintenance] : [] }),
       saveDiscordCredentials: async () => undefined,
       saveDiscordConfiguration: async () => undefined,
       sendDiscordTest: async () => 8,
-      createMaintenance: async () => undefined,
+      createMaintenance: async (input) => {
+        createdMaintenance = input;
+      },
       finishMaintenance: async () => true,
       publicStatusEvents: async () => [],
       discordBotConfiguration: async () => ({
@@ -139,7 +199,25 @@ before(async () => {
       }),
       reportDiscordPresence: async () => undefined,
       recordAnnouncementSent: async () => undefined,
-      githubAdminView: async () => ({ repositories: [], channels: [], pendingEvents: 0 }),
+      githubVisibilityView: async () => ({
+        visibleOwner: visibleGithubOwner,
+        owners: ["Angel", "Legacy-Hosting"],
+      }),
+      saveGithubVisibility: async (owner) => {
+        if (owner && !["Angel", "Legacy-Hosting"].some((candidate) => candidate.toLowerCase() === owner.toLowerCase())) {
+          throw new Error("unknown_github_owner");
+        }
+        visibleGithubOwner = ["Angel", "Legacy-Hosting"].find(
+          (candidate) => candidate.toLowerCase() === owner.toLowerCase(),
+        ) ?? "";
+      },
+      githubAdminView: async () => ({
+        repositories: githubRepositories
+          .filter((repository) => !visibleGithubOwner || repository.fullName.startsWith(`${visibleGithubOwner}/`))
+          .map((repository) => ({ ...repository, enabled: false, channelIds: [] })),
+        channels: [],
+        pendingEvents: 0,
+      }),
       saveGithubConfiguration: async () => undefined,
       ingestGithubPush: async () => true,
       githubPushEvents: async () => [],
@@ -158,7 +236,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-    version: "0.7.3",
+    version: "0.7.4",
   });
 });
 
@@ -269,7 +347,44 @@ test("service checks run server-side for authorized staff", async () => {
   assert.equal(infrastructure.statusCode, 200);
   assert.equal(infrastructure.json().state, "ready");
   assert.equal(infrastructure.json().droplets[0].name, "ams3-hub-01");
+  assert.equal(infrastructure.json().statusComponents.components[0].originFqdn, "ams3.hub-01.legacyh.fyi");
   assert.equal(JSON.stringify(infrastructure.json()).includes("token"), false);
+});
+
+test("platform administrators configure Status services with direct origin FQDNs", async () => {
+  const denied = await app.inject({
+    method: "PUT",
+    url: "/api/v1/settings/status-components",
+    headers: { authorization: "Bearer infrastructure-token", origin: "https://hub.legacyhosting.xyz" },
+    payload: { components: [] },
+  });
+  assert.equal(denied.statusCode, 403);
+
+  const saved = await app.inject({
+    method: "PUT",
+    url: "/api/v1/settings/status-components",
+    headers: { authorization: "Bearer admin-token", origin: "https://hub.legacyhosting.xyz" },
+    payload: {
+      components: [{
+        server: "ams3-hub-01",
+        visible: true,
+        primary: true,
+        displayName: "Staff Hub",
+        datacenter: "Amsterdam 3",
+        service: "Hub",
+        number: "01",
+        publicUrl: "https://hub.legacyhosting.xyz/health",
+        originFqdn: "ams3.hub-01.legacyh.fyi",
+      }],
+    },
+  });
+  assert.equal(saved.statusCode, 200);
+  assert.equal(saved.json().components[0].originFqdn, "ams3.hub-01.legacyh.fyi");
+
+  const publicView = await app.inject({ method: "GET", url: "/api/v1/public/status-components" });
+  assert.equal(publicView.statusCode, 200);
+  assert.equal(publicView.json()[0].connectHostname, "ams3.hub-01.legacyh.fyi");
+  assert.equal(publicView.headers["cache-control"], "public, max-age=15, stale-if-error=300");
 });
 
 test("only platform administrators can manage the encrypted DigitalOcean token", async () => {
@@ -307,6 +422,48 @@ test("only platform administrators can manage the encrypted DigitalOcean token",
   assert.equal(removed.json().configured, false);
 });
 
+test("platform administrators can limit the GitHub workspace to one repository owner", async () => {
+  const denied = await app.inject({
+    method: "GET",
+    url: "/api/v1/settings/github",
+    headers: { authorization: "Bearer infrastructure-token" },
+  });
+  assert.equal(denied.statusCode, 403);
+
+  const available = await app.inject({
+    method: "GET",
+    url: "/api/v1/settings/github",
+    headers: { authorization: "Bearer admin-token" },
+  });
+  assert.equal(available.statusCode, 200);
+  assert.deepEqual(available.json().owners, ["Angel", "Legacy-Hosting"]);
+
+  const invalidOrigin = await app.inject({
+    method: "PUT",
+    url: "/api/v1/settings/github",
+    headers: { authorization: "Bearer admin-token", origin: "https://attacker.invalid" },
+    payload: { visibleOwner: "Legacy-Hosting" },
+  });
+  assert.equal(invalidOrigin.statusCode, 403);
+
+  const saved = await app.inject({
+    method: "PUT",
+    url: "/api/v1/settings/github",
+    headers: { authorization: "Bearer admin-token", origin: "https://hub.legacyhosting.xyz" },
+    payload: { visibleOwner: "legacy-hosting" },
+  });
+  assert.equal(saved.statusCode, 200);
+  assert.equal(saved.json().visibleOwner, "Legacy-Hosting");
+
+  const github = await app.inject({
+    method: "GET",
+    url: "/api/v1/github",
+    headers: { authorization: "Bearer admin-token" },
+  });
+  assert.equal(github.statusCode, 200);
+  assert.deepEqual(github.json().repositories.map((repository: { fullName: string }) => repository.fullName), ["Legacy-Hosting/LH-Hub"]);
+});
+
 test("audit events are proxied only for audit-capable staff", async () => {
   const allowed = await app.inject({
     method: "GET",
@@ -341,6 +498,46 @@ test("operations combine the protected API summary and public status snapshot", 
     headers: { authorization: "Bearer staff-token" },
   });
   assert.equal(denied.statusCode, 403);
+});
+
+test("maintenance can cover multiple services with a selected impact", async () => {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/maintenance",
+    headers: {
+      authorization: "Bearer infrastructure-token",
+      origin: "https://hub.legacyhosting.xyz",
+    },
+    payload: {
+      targetKeys: ["api", "sso"],
+      impact: "major",
+      title: "Platform maintenance",
+      message: "Updating shared infrastructure.",
+      scheduledFor: "2026-12-01T10:00:00.000Z",
+      scheduledUntil: "2026-12-01T11:00:00.000Z",
+    },
+  });
+  assert.equal(response.statusCode, 201);
+  assert.deepEqual(createdMaintenance?.targetKeys, ["api", "sso"]);
+  assert.equal(createdMaintenance?.impact, "major");
+
+  const duplicate = await app.inject({
+    method: "POST",
+    url: "/api/v1/maintenance",
+    headers: {
+      authorization: "Bearer infrastructure-token",
+      origin: "https://hub.legacyhosting.xyz",
+    },
+    payload: {
+      targetKeys: ["api", "api"],
+      impact: "minor",
+      title: "Invalid maintenance",
+      message: "Duplicate services are rejected.",
+      scheduledFor: "2026-12-01T10:00:00.000Z",
+      scheduledUntil: "2026-12-01T11:00:00.000Z",
+    },
+  });
+  assert.equal(duplicate.statusCode, 400);
 });
 
 test("LH-Discord configuration is available only to the internal bot service", async () => {

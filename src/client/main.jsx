@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import packageMetadata from "../../package.json";
 import {
@@ -27,6 +27,7 @@ import {
   MaintenanceWorkspace,
 } from "./discord.jsx";
 import { GitHubWorkspace } from "./github.jsx";
+import { StatusComponentManager } from "./infrastructure.jsx";
 import "./styles.css";
 
 const navigation = [
@@ -146,6 +147,21 @@ async function jsonResponse(url) {
   return response.json();
 }
 
+function githubConfigurationSignature(configuration) {
+  const repositories = Array.isArray(configuration?.repositories)
+    ? configuration.repositories
+    : [];
+  return JSON.stringify(repositories
+    .map((repository) => ({
+      fullName: String(repository.fullName ?? "").toLowerCase(),
+      enabled: Boolean(repository.enabled),
+      channelIds: Array.isArray(repository.channelIds)
+        ? [...repository.channelIds].sort()
+        : [],
+    }))
+    .sort((left, right) => left.fullName.localeCompare(right.fullName)));
+}
+
 function App() {
   const [now, setNow] = useState(new Date());
   const [health, setHealth] = useState("checking");
@@ -176,16 +192,39 @@ function App() {
   const [digitalOceanToken, setDigitalOceanToken] = useState("");
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState("");
+  const [statusLayoutBusy, setStatusLayoutBusy] = useState(false);
+  const [statusLayoutMessage, setStatusLayoutMessage] = useState("");
   const [discordConfiguration, setDiscordConfiguration] = useState(null);
   const [discordBusy, setDiscordBusy] = useState(false);
   const [discordMessage, setDiscordMessage] = useState("");
   const [githubConfiguration, setGithubConfiguration] = useState(null);
   const [githubBusy, setGithubBusy] = useState(false);
   const [githubMessage, setGithubMessage] = useState("");
+  const [githubDirty, setGithubDirty] = useState(false);
+  const githubDirtyRef = useRef(false);
+  const githubSavedSignatureRef = useRef("");
+  const [githubVisibility, setGithubVisibility] = useState({ visibleOwner: "", owners: [] });
+  const [githubVisibilityBusy, setGithubVisibilityBusy] = useState(false);
+  const [githubVisibilityMessage, setGithubVisibilityMessage] = useState("");
   const [maintenanceData, setMaintenanceData] = useState(null);
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState("");
   const authError = new URLSearchParams(window.location.search).has("auth_error");
+
+  function acceptGithubConfiguration(configuration) {
+    githubSavedSignatureRef.current = githubConfigurationSignature(configuration);
+    githubDirtyRef.current = false;
+    setGithubDirty(false);
+    setGithubConfiguration(configuration);
+  }
+
+  function editGithubConfiguration(configuration) {
+    const dirty = githubConfigurationSignature(configuration) !== githubSavedSignatureRef.current;
+    githubDirtyRef.current = dirty;
+    setGithubDirty(dirty);
+    setGithubMessage("");
+    setGithubConfiguration(configuration);
+  }
 
   useEffect(() => {
     const clockTimer = setInterval(() => setNow(new Date()), 1000);
@@ -207,7 +246,7 @@ function App() {
       const canManageDiscord = capabilities.includes("discord:manage");
       const canManageGithub = capabilities.includes("github:manage");
       const canWriteMaintenance = capabilities.includes("maintenance:write");
-      const [overviewResult, infrastructureResult, operationsResult, auditResult, settingsResult, discordResult, maintenanceResult, githubResult] = await Promise.allSettled([
+      const [overviewResult, infrastructureResult, operationsResult, auditResult, settingsResult, discordResult, maintenanceResult, githubResult, githubVisibilityResult] = await Promise.allSettled([
         jsonResponse("/api/v1/overview"),
         canViewInfrastructure
           ? jsonResponse("/api/v1/infrastructure")
@@ -229,6 +268,9 @@ function App() {
           : Promise.resolve(null),
         canManageGithub
           ? jsonResponse("/api/v1/github")
+          : Promise.resolve(null),
+        canWriteSettings && canManageGithub
+          ? jsonResponse("/api/v1/settings/github")
           : Promise.resolve(null),
       ]);
       if (active) {
@@ -275,7 +317,15 @@ function App() {
           setMaintenanceData(maintenanceResult.value);
         }
         if (canManageGithub && githubResult.status === "fulfilled" && githubResult.value) {
-          setGithubConfiguration(githubResult.value);
+          if (!githubDirtyRef.current) acceptGithubConfiguration(githubResult.value);
+        }
+        if (
+          canWriteSettings &&
+          canManageGithub &&
+          githubVisibilityResult.status === "fulfilled" &&
+          githubVisibilityResult.value
+        ) {
+          setGithubVisibility(githubVisibilityResult.value);
         }
       }
       refreshing = false;
@@ -407,6 +457,46 @@ function App() {
     }
   }
 
+  function editStatusComponents(configuration) {
+    setStatusLayoutMessage("");
+    setInfrastructure((current) => ({ ...current, statusComponents: configuration }));
+  }
+
+  async function saveStatusComponents() {
+    const configuration = infrastructure.statusComponents;
+    if (!configuration || !Array.isArray(configuration.components)) return;
+    setStatusLayoutBusy(true);
+    setStatusLayoutMessage("");
+    try {
+      const response = await fetch("/api/v1/settings/status-components", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          components: configuration.components.map((component) => ({
+            server: component.server,
+            visible: component.visible,
+            primary: component.primary,
+            displayName: component.displayName,
+            datacenter: component.datacenter,
+            service: component.service,
+            number: component.number,
+            publicUrl: component.publicUrl,
+            originFqdn: component.originFqdn,
+          })),
+        }),
+      });
+      if (!response.ok) throw new Error("The Status layout could not be saved. Check all visible service addresses and origin FQDNs.");
+      const statusComponents = await response.json();
+      setInfrastructure((current) => ({ ...current, statusComponents }));
+      setStatusLayoutMessage("Status layout and direct origin addresses were saved.");
+    } catch (error) {
+      setStatusLayoutMessage(error instanceof Error ? error.message : "The Status layout could not be saved.");
+    } finally {
+      setStatusLayoutBusy(false);
+    }
+  }
+
   function navigate(section) {
     const destination = navigation.find((item) => item.key === section) ?? navigation[0];
     if (window.location.pathname !== destination.path) {
@@ -509,12 +599,38 @@ function App() {
         }),
       });
       if (!response.ok) throw new Error("The GitHub configuration could not be saved.");
-      setGithubConfiguration(await response.json());
-      setGithubMessage("Tracked repositories and push channels were saved.");
+      acceptGithubConfiguration(await response.json());
+      setGithubMessage("");
     } catch (error) {
       setGithubMessage(error instanceof Error ? error.message : "The GitHub configuration could not be saved.");
     } finally {
       setGithubBusy(false);
+    }
+  }
+
+  async function saveGithubVisibility(event) {
+    event.preventDefault();
+    if (githubDirtyRef.current) {
+      setGithubVisibilityMessage("Save your pending repository changes before changing the visible organization.");
+      return;
+    }
+    setGithubVisibilityBusy(true);
+    setGithubVisibilityMessage("");
+    try {
+      const response = await fetch("/api/v1/settings/github", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ visibleOwner: githubVisibility.visibleOwner }),
+      });
+      if (!response.ok) throw new Error("The GitHub organization filter could not be saved.");
+      setGithubVisibility(await response.json());
+      acceptGithubConfiguration(await jsonResponse("/api/v1/github"));
+      setGithubVisibilityMessage("The GitHub page now shows repositories from the selected owner only.");
+    } catch (error) {
+      setGithubVisibilityMessage(error instanceof Error ? error.message : "The GitHub organization filter could not be saved.");
+    } finally {
+      setGithubVisibilityBusy(false);
     }
   }
 
@@ -720,6 +836,14 @@ function App() {
                   </div>
                 )}
               </div>
+              <StatusComponentManager
+                configuration={infrastructure.statusComponents}
+                canConfigure={auth.capabilities.includes("settings:write")}
+                busy={statusLayoutBusy}
+                message={statusLayoutMessage}
+                onChange={editStatusComponents}
+                onSave={saveStatusComponents}
+              />
             </>
           )}
 
@@ -788,10 +912,11 @@ function App() {
           {activeNavigation.key === "github" && (
             <GitHubWorkspace
               configuration={githubConfiguration}
-              onChange={setGithubConfiguration}
+              onChange={editGithubConfiguration}
               onSave={saveGithubConfiguration}
               busy={githubBusy}
               message={githubMessage}
+              dirty={githubDirty}
             />
           )}
 
@@ -834,6 +959,43 @@ function App() {
                   <button className="primary" type="submit" disabled={settingsBusy || digitalOceanToken.length < 32}>
                     {settingsBusy ? <RefreshCw className="spin" size={15} /> : <ShieldCheck size={15} />}
                     Verify and save token
+                  </button>
+                </div>
+              </form>
+              <div className="section-title settings-subtitle">
+                <div><span>Repository visibility</span><h2>GitHub organization</h2></div>
+                <p>Limit the GitHub workspace to one organization or account owner.</p>
+              </div>
+              <form className="provider-settings-card" onSubmit={saveGithubVisibility}>
+                <div className="provider-settings-head">
+                  <div className="workspace-icon"><GitFork size={22} /></div>
+                  <div>
+                    <span>GitHub</span>
+                    <h3>Visible repository owner</h3>
+                    <p>Repositories owned by other organizations and personal accounts stay hidden without deleting their saved routes.</p>
+                  </div>
+                  <b className={githubVisibility.visibleOwner ? "configured" : "missing"}>
+                    {githubVisibility.visibleOwner ? "Filtered" : "All owners"}
+                  </b>
+                </div>
+                <label className="token-field">
+                  <span>Organization or owner</span>
+                  <select
+                    value={githubVisibility.visibleOwner}
+                    onChange={(event) => {
+                      setGithubVisibility((current) => ({ ...current, visibleOwner: event.target.value }));
+                      setGithubVisibilityMessage("");
+                    }}
+                  >
+                    <option value="">Show all accessible owners</option>
+                    {githubVisibility.owners.map((owner) => <option value={owner} key={owner}>{owner}</option>)}
+                  </select>
+                </label>
+                {githubVisibilityMessage && <p className="settings-message" role="status">{githubVisibilityMessage}</p>}
+                <div className="provider-actions">
+                  <button className="primary" type="submit" disabled={githubVisibilityBusy}>
+                    {githubVisibilityBusy ? <RefreshCw className="spin" size={15} /> : <ShieldCheck size={15} />}
+                    Save GitHub visibility
                   </button>
                 </div>
               </form>

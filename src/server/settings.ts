@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
@@ -69,10 +69,32 @@ export const githubPushEventSchema = z.object({
   channelIds: channelIdsSchema.optional(),
 });
 const githubSettingsSchema = z.object({
+  visibleOwner: z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/).or(z.literal("")).default(""),
   repositories: z.array(githubRepositorySettingSchema).default([]),
   knownRepositories: z.array(githubRepositorySchema).default([]),
   pendingEvents: z.array(githubPushEventSchema.extend({ channelIds: channelIdsSchema })).default([]),
-}).default({ repositories: [], knownRepositories: [], pendingEvents: [] });
+}).default({ visibleOwner: "", repositories: [], knownRepositories: [], pendingEvents: [] });
+
+const statusComponentSchema = z.object({
+  server: z.string().trim().regex(/^[A-Za-z0-9.-]{1,120}$/),
+  componentKey: z.string().regex(/^[a-z0-9][a-z0-9-]{1,31}$/),
+  visible: z.boolean(),
+  primary: z.boolean(),
+  displayName: z.string().trim().min(2).max(80),
+  datacenter: z.string().trim().min(2).max(80),
+  service: z.string().trim().min(2).max(80),
+  number: z.string().trim().regex(/^[A-Za-z0-9-]{1,12}$/),
+  primaryOrder: z.number().int().min(0).max(999),
+  publicUrl: z.string().url().or(z.literal("")),
+  originFqdn: z.string().trim().toLowerCase().regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/),
+});
+const statusComponentInputSchema = statusComponentSchema.omit({
+  componentKey: true,
+  primaryOrder: true,
+});
+const statusSettingsSchema = z.object({
+  components: z.array(statusComponentSchema).max(100).default([]),
+}).default({ components: [] });
 
 export const discordServiceDefinitions = [
   { key: "api", name: "API", server: "ams3-api-01", url: "https://api.legacyhosting.xyz/health" },
@@ -131,6 +153,8 @@ const announcementDefaults = {
 
 const announcementKeySchema = z.enum(["birthday", "christmas", "newyear"]);
 const eventKeySchema = z.enum(["operational", "degraded", "outage", "maintenance", "maintenanceComplete"]);
+const discordServiceKeySchema = z.enum(["api", "sso", "hub", "panel", "status"]);
+const maintenanceImpactSchema = z.enum(["none", "minor", "major", "critical"]);
 const announcementSchema = z.object({
   key: announcementKeySchema,
   enabled: z.boolean(),
@@ -139,9 +163,15 @@ const announcementSchema = z.object({
   channelIds: channelIdsSchema,
   lastSentYear: z.number().int().min(2017).max(9999).optional(),
 });
-const maintenanceSchema = z.object({
+const maintenanceSchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const item = value as Record<string, unknown>;
+  if (Array.isArray(item.targetKeys) || typeof item.targetKey !== "string") return value;
+  return { ...item, targetKeys: [item.targetKey] };
+}, z.object({
   id: z.string().regex(/^maintenance-[a-f0-9]{24}$/),
-  targetKey: z.enum(["api", "sso", "hub", "panel", "status"]),
+  targetKeys: z.array(discordServiceKeySchema).min(1).max(discordServiceKeySchema.options.length),
+  impact: maintenanceImpactSchema.default("none"),
   title: z.string().trim().min(3).max(120),
   message: z.string().trim().min(3).max(1_000),
   scheduledFor: z.string().datetime(),
@@ -150,7 +180,7 @@ const maintenanceSchema = z.object({
   cancelledAt: z.string().datetime().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-});
+}));
 const discordSettingsSchema = z.object({
   botToken: encryptedSecretSchema.optional(),
   guildId: snowflakeSchema.optional(),
@@ -172,6 +202,7 @@ const storedSettingsSchema = z.object({
   digitalOceanToken: encryptedSecretSchema.optional(),
   discord: discordSettingsSchema.optional(),
   github: githubSettingsSchema.optional(),
+  status: statusSettingsSchema.optional(),
 });
 type StoredSettings = z.infer<typeof storedSettingsSchema>;
 type AnnouncementKey = z.infer<typeof announcementKeySchema>;
@@ -186,6 +217,12 @@ export type HubSettingsService = {
   digitalOceanStatus(): Promise<{ configured: boolean; source: "stored" | "environment" | "none" }>;
   saveDigitalOceanToken(token: string): Promise<void>;
   clearDigitalOceanToken(): Promise<void>;
+  statusComponentAdminView(servers?: Array<{ name: string; region: string }>): Promise<unknown>;
+  saveStatusComponents(
+    input: Array<Omit<z.infer<typeof statusComponentSchema>, "componentKey" | "primaryOrder">>,
+    servers: Array<{ name: string; region: string }>,
+  ): Promise<void>;
+  publicStatusComponents(): Promise<unknown[]>;
   discordAdminView(): Promise<unknown>;
   maintenanceView(): Promise<unknown>;
   saveDiscordCredentials(input: { botToken?: string; guildId: string }): Promise<void>;
@@ -197,7 +234,8 @@ export type HubSettingsService = {
   }): Promise<void>;
   sendDiscordTest(channelId: string, announcements?: DiscordTestAnnouncement[]): Promise<number>;
   createMaintenance(input: {
-    targetKey: "api" | "sso" | "hub" | "panel" | "status";
+    targetKeys: Array<z.infer<typeof discordServiceKeySchema>>;
+    impact: z.infer<typeof maintenanceImpactSchema>;
     title: string;
     message: string;
     scheduledFor: string;
@@ -211,6 +249,11 @@ export type HubSettingsService = {
     channels: Array<{ id: string; name: string }>;
   }): Promise<void>;
   recordAnnouncementSent(key: AnnouncementKey, year: number): Promise<void>;
+  githubVisibilityView(repositories?: Array<z.infer<typeof githubRepositorySchema>>): Promise<unknown>;
+  saveGithubVisibility(
+    visibleOwner: string,
+    repositories?: Array<z.infer<typeof githubRepositorySchema>>,
+  ): Promise<void>;
   githubAdminView(repositories?: Array<z.infer<typeof githubRepositorySchema>>): Promise<unknown>;
   saveGithubConfiguration(input: Array<z.infer<typeof githubRepositorySettingSchema>>): Promise<void>;
   ingestGithubPush(input: z.infer<typeof githubPushEventSchema>): Promise<boolean>;
@@ -244,6 +287,183 @@ function normalizedDiscord(settings: StoredSettings) {
 
 function normalizedGithub(settings: StoredSettings) {
   return githubSettingsSchema.parse(settings.github ?? {});
+}
+
+function normalizedStatus(settings: StoredSettings) {
+  return statusSettingsSchema.parse(settings.status ?? {});
+}
+
+const knownStatusComponents: Record<string, Omit<z.infer<typeof statusComponentSchema>, "server">> = {
+  "ams3-api-01": {
+    componentKey: "api",
+    visible: true,
+    primary: true,
+    displayName: "API",
+    datacenter: "Amsterdam 3",
+    service: "API",
+    number: "01",
+    primaryOrder: 0,
+    publicUrl: "https://api.legacyhosting.xyz/health",
+    originFqdn: "ams3.api-01.legacyh.fyi",
+  },
+  "ams3-sso-01": {
+    componentKey: "sso",
+    visible: true,
+    primary: true,
+    displayName: "SSO",
+    datacenter: "Amsterdam 3",
+    service: "SSO",
+    number: "01",
+    primaryOrder: 1,
+    publicUrl: "https://auth.legacyhosting.xyz/health",
+    originFqdn: "ams3.sso-01.legacyh.fyi",
+  },
+  "ams3-panel-01": {
+    componentKey: "panel",
+    visible: true,
+    primary: true,
+    displayName: "Web Panel",
+    datacenter: "Amsterdam 3",
+    service: "Web Panel",
+    number: "01",
+    primaryOrder: 2,
+    publicUrl: "https://panel.legacyhosting.xyz/",
+    originFqdn: "ams3.panel-01.legacyh.fyi",
+  },
+  "ams3-hub-01": {
+    componentKey: "hub",
+    visible: false,
+    primary: false,
+    displayName: "Staff Hub",
+    datacenter: "Amsterdam 3",
+    service: "Hub",
+    number: "01",
+    primaryOrder: 0,
+    publicUrl: "https://hub.legacyhosting.xyz/health",
+    originFqdn: "ams3.hub-01.legacyh.fyi",
+  },
+  "fra1-status-01": {
+    componentKey: "status",
+    visible: false,
+    primary: false,
+    displayName: "Public Status",
+    datacenter: "Frankfurt 1",
+    service: "Status",
+    number: "01",
+    primaryOrder: 0,
+    publicUrl: "https://status.legacyhosting.xyz/health",
+    originFqdn: "fra1.status-01.legacyh.fyi",
+  },
+};
+
+const datacenterNames: Record<string, string> = {
+  ams3: "Amsterdam 3",
+  fra1: "Frankfurt 1",
+  lon1: "London 1",
+  nyc3: "New York 3",
+  sfo3: "San Francisco 3",
+  sgp1: "Singapore 1",
+  syd1: "Sydney 1",
+  tor1: "Toronto 1",
+  blr1: "Bangalore 1",
+};
+
+function displayWord(value: string) {
+  if (["api", "sso", "cdn", "dns"].includes(value.toLowerCase())) return value.toUpperCase();
+  return value.split("-").map((part) => part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : "").join(" ");
+}
+
+function componentKeyForServer(server: string) {
+  const known = knownStatusComponents[server.toLowerCase()];
+  if (known) return known.componentKey;
+  const slug = server.toLowerCase().replaceAll(/[^a-z0-9-]+/g, "-").replaceAll(/^-+|-+$/g, "");
+  if (slug.length <= 32) return slug;
+  return `${slug.slice(0, 23)}-${createHash("sha256").update(server).digest("hex").slice(0, 8)}`;
+}
+
+function inferredStatusComponent(server: string, region: string) {
+  const known = knownStatusComponents[server.toLowerCase()];
+  if (known) return { server, ...known };
+  const parts = server.toLowerCase().split("-").filter(Boolean);
+  const datacenterCode = parts[0] ?? region;
+  const number = parts.at(-1) ?? "01";
+  const serviceCode = parts.slice(1, -1).join("-") || "server";
+  const service = displayWord(serviceCode);
+  return {
+    server,
+    componentKey: componentKeyForServer(server),
+    visible: false,
+    primary: false,
+    displayName: `${service} ${number}`,
+    datacenter: datacenterNames[datacenterCode] ?? displayWord(datacenterCode),
+    service,
+    number,
+    primaryOrder: 0,
+    publicUrl: "",
+    originFqdn: directHostname(server),
+  } satisfies z.infer<typeof statusComponentSchema>;
+}
+
+function defaultStatusComponents() {
+  return Object.entries(knownStatusComponents)
+    .filter(([, component]) => component.visible)
+    .map(([server, component]) => ({ server, ...component }));
+}
+
+function configuredStatusComponents(settings: StoredSettings) {
+  const status = normalizedStatus(settings);
+  return status.components.length > 0 ? status.components : defaultStatusComponents();
+}
+
+function directHostname(server: string) {
+  const [datacenter, ...remaining] = server.toLowerCase().split("-").filter(Boolean);
+  if (!datacenter || remaining.length === 0) throw new Error("invalid_status_server_name");
+  return `${datacenter}.${remaining.join("-")}.legacyh.fyi`;
+}
+
+function validatedPublicUrl(value: string) {
+  const url = new URL(value);
+  if (url.protocol !== "https:" || url.username || url.password || url.hash) {
+    throw new Error("invalid_status_public_url");
+  }
+  return url.toString();
+}
+
+function statusComponentSort(
+  left: z.infer<typeof statusComponentSchema>,
+  right: z.infer<typeof statusComponentSchema>,
+) {
+  if (left.primary !== right.primary) return left.primary ? -1 : 1;
+  if (left.primary) return left.primaryOrder - right.primaryOrder;
+  return left.datacenter.localeCompare(right.datacenter, undefined, { numeric: true })
+    || left.service.localeCompare(right.service, undefined, { numeric: true })
+    || left.number.localeCompare(right.number, undefined, { numeric: true });
+}
+
+function githubOwner(fullName: string) {
+  return fullName.slice(0, fullName.indexOf("/"));
+}
+
+function githubOwners(
+  github: z.infer<typeof githubSettingsSchema>,
+  repositories: Array<z.infer<typeof githubRepositorySchema>>,
+) {
+  const owners = new Map<string, string>();
+  for (const repository of [
+    ...github.knownRepositories,
+    ...repositories,
+    ...github.repositories.map((item) => ({
+      fullName: item.fullName,
+      url: `https://github.com/${item.fullName}`,
+      defaultBranch: "main",
+      private: true,
+    })),
+  ]) {
+    const owner = githubOwner(repository.fullName);
+    if (owner) owners.set(owner.toLowerCase(), owner);
+  }
+  if (github.visibleOwner) owners.set(github.visibleOwner.toLowerCase(), github.visibleOwner);
+  return Array.from(owners.values()).sort((left, right) => left.localeCompare(right));
 }
 
 function normalizedAnnouncements(discord: z.infer<typeof discordSettingsSchema>) {
@@ -379,6 +599,75 @@ export function createHubSettingsService(options: {
         return remaining;
       });
     },
+    async statusComponentAdminView(servers = []) {
+      const settings = await readSettings();
+      const configured = new Map(
+        configuredStatusComponents(settings).map((component) => [component.server.toLowerCase(), component]),
+      );
+      const components = servers.map((server) => {
+        const inferred = inferredStatusComponent(server.name, server.region);
+        return configured.get(server.name.toLowerCase()) ?? inferred;
+      }).sort(statusComponentSort);
+      return {
+        components,
+        datacenters: Array.from(new Set(components.map((component) => component.datacenter))).sort(
+          (left, right) => left.localeCompare(right, undefined, { numeric: true }),
+        ),
+        services: Array.from(new Set(components.map((component) => component.service))).sort(
+          (left, right) => left.localeCompare(right, undefined, { numeric: true }),
+        ),
+      };
+    },
+    async saveStatusComponents(input, servers) {
+      const components = z.array(statusComponentInputSchema).max(100).parse(input);
+      const allowedServers = new Set(servers.map((server) => server.name.toLowerCase()));
+      if (components.some((component) => !allowedServers.has(component.server.toLowerCase()))) {
+        throw new Error("unknown_status_server");
+      }
+      if (new Set(components.map((component) => component.server.toLowerCase())).size !== components.length) {
+        throw new Error("duplicate_status_server");
+      }
+      if (!components.some((component) => component.visible && component.publicUrl)) {
+        throw new Error("status_component_required");
+      }
+      const current = new Map(
+        configuredStatusComponents(await readSettings()).map((component) => [component.server.toLowerCase(), component]),
+      );
+      let primaryOrder = 0;
+      const saved = components.map((component) => {
+        if (component.visible && !component.publicUrl) throw new Error("status_public_url_required");
+        return statusComponentSchema.parse({
+          ...component,
+          componentKey: current.get(component.server.toLowerCase())?.componentKey
+            ?? componentKeyForServer(component.server),
+          primaryOrder: component.primary ? primaryOrder++ : 0,
+          publicUrl: component.publicUrl ? validatedPublicUrl(component.publicUrl) : "",
+        });
+      });
+      if (new Set(saved.map((component) => component.componentKey)).size !== saved.length) {
+        throw new Error("duplicate_status_component_key");
+      }
+      await mutate((settings) => ({
+        ...settings,
+        status: { components: saved },
+      }));
+    },
+    async publicStatusComponents() {
+      return configuredStatusComponents(await readSettings())
+        .filter((component) => component.visible && component.publicUrl)
+        .sort(statusComponentSort)
+        .map((component) => ({
+          key: component.componentKey,
+          name: component.displayName,
+          url: component.publicUrl,
+          connectHostname: component.originFqdn,
+          primary: component.primary,
+          datacenter: component.datacenter,
+          service: component.service,
+          number: component.number,
+          order: component.primaryOrder,
+        }));
+    },
     async discordAdminView() {
       return discordView(false);
     },
@@ -496,6 +785,9 @@ export function createHubSettingsService(options: {
       if (Date.parse(input.scheduledUntil) <= Date.parse(input.scheduledFor)) {
         throw new Error("invalid_maintenance_window");
       }
+      if (new Set(input.targetKeys).size !== input.targetKeys.length) {
+        throw new Error("duplicate_maintenance_target");
+      }
       const now = new Date().toISOString();
       const item = maintenanceSchema.parse({
         ...input,
@@ -528,18 +820,28 @@ export function createHubSettingsService(options: {
     },
     async publicStatusEvents() {
       const view = await discordView(false) as { maintenance: Array<z.infer<typeof maintenanceSchema> & { status: string }> };
-      const publicKeys = new Set(["api", "sso", "panel"]);
+      const statusComponents = configuredStatusComponents(await readSettings())
+        .filter((component) => component.visible && component.publicUrl);
       return view.maintenance
-        .filter((item) => publicKeys.has(item.targetKey) && item.status !== "cancelled")
+        .map((item) => ({
+          ...item,
+          publicTargetKeys: Array.from(new Set(item.targetKeys.flatMap((targetKey) =>
+            statusComponents
+              .filter((component) => component.componentKey === targetKey
+                || component.service.toLowerCase().replaceAll(/[^a-z0-9]+/g, "") === targetKey)
+              .map((component) => component.componentKey)
+          ))),
+        }))
+        .filter((item) => item.publicTargetKeys.length > 0 && item.status !== "cancelled")
         .filter((item) => item.status !== "completed" || Date.now() - Date.parse(item.scheduledUntil) < 7 * 86_400_000)
         .map((item) => ({
           id: item.id,
           type: "maintenance",
           title: item.title,
           message: item.message,
-          impact: "none",
+          impact: item.impact,
           status: item.status,
-          components: [item.targetKey],
+          components: item.publicTargetKeys,
           startedAt: item.createdAt,
           updatedAt: item.updatedAt,
           scheduledFor: item.scheduledFor,
@@ -572,6 +874,28 @@ export function createHubSettingsService(options: {
         return { ...settings, discord: { ...discord, announcements } };
       });
     },
+    async githubVisibilityView(repositories = []) {
+      const github = normalizedGithub(await readSettings());
+      return {
+        visibleOwner: github.visibleOwner,
+        owners: githubOwners(github, repositories),
+      };
+    },
+    async saveGithubVisibility(visibleOwner, repositories = []) {
+      const owner = z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/).or(z.literal("")).parse(visibleOwner);
+      await mutate((settings) => {
+        const github = normalizedGithub(settings);
+        const owners = githubOwners(github, repositories);
+        const selected = owner
+          ? owners.find((candidate) => candidate.toLowerCase() === owner.toLowerCase())
+          : "";
+        if (owner && !selected) throw new Error("unknown_github_owner");
+        return {
+          ...settings,
+          github: { ...github, visibleOwner: selected ?? "" },
+        };
+      });
+    },
     async githubAdminView(repositories = []) {
       const settings = await readSettings();
       const github = normalizedGithub(settings);
@@ -599,6 +923,8 @@ export function createHubSettingsService(options: {
         pendingEvents: github.pendingEvents.length,
         channels: discord.channels,
         repositories: Array.from(available.values())
+          .filter((repository) => !github.visibleOwner
+            || githubOwner(repository.fullName).toLowerCase() === github.visibleOwner.toLowerCase())
           .sort((left, right) => left.fullName.localeCompare(right.fullName))
           .map((repository) => {
             const selection = configured.get(repository.fullName.toLowerCase());
@@ -616,7 +942,20 @@ export function createHubSettingsService(options: {
       if (new Set(names).size !== names.length) throw new Error("duplicate_github_repository");
       await mutate((settings) => {
         const github = normalizedGithub(settings);
-        return { ...settings, github: { ...github, repositories } };
+        if (github.visibleOwner && repositories.some(
+          (repository) => githubOwner(repository.fullName).toLowerCase() !== github.visibleOwner.toLowerCase(),
+        )) {
+          throw new Error("github_repository_outside_visible_owner");
+        }
+        const hiddenRepositories = github.visibleOwner
+          ? github.repositories.filter(
+            (repository) => githubOwner(repository.fullName).toLowerCase() !== github.visibleOwner.toLowerCase(),
+          )
+          : [];
+        return {
+          ...settings,
+          github: { ...github, repositories: [...hiddenRepositories, ...repositories] },
+        };
       });
     },
     async ingestGithubPush(input) {

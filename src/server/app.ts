@@ -271,7 +271,49 @@ export async function buildApp(options: {
     if (!options.infrastructureReader) {
       return { state: "not_configured", fetchedAt: null, droplets: [] };
     }
-    return options.infrastructureReader();
+    const snapshot = await options.infrastructureReader();
+    const statusComponents = options.settings
+      ? await options.settings.statusComponentAdminView(
+        snapshot.droplets.map((droplet) => ({ name: droplet.name, region: droplet.region })),
+      )
+      : { components: [], datacenters: [], services: [] };
+    return { ...snapshot, statusComponents };
+  });
+
+  app.put("/api/v1/settings/status-components", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "settings:write")) {
+      return reply.status(403).send({ error: "platform_admin_required" });
+    }
+    if (!validBrowserOrigin(request.headers.origin)) return reply.status(403).send({ error: "invalid_origin" });
+    if (!options.settings || !options.infrastructureReader) {
+      return reply.status(503).send({ error: "infrastructure_settings_not_configured" });
+    }
+    const body = z.object({
+      components: z.array(z.object({
+        server: z.string().trim().regex(/^[A-Za-z0-9.-]{1,120}$/),
+        visible: z.boolean(),
+        primary: z.boolean(),
+        displayName: z.string().trim().min(2).max(80),
+        datacenter: z.string().trim().min(2).max(80),
+        service: z.string().trim().min(2).max(80),
+        number: z.string().trim().regex(/^[A-Za-z0-9-]{1,12}$/),
+        publicUrl: z.string().url().or(z.literal("")),
+        originFqdn: z.string().trim().toLowerCase().regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/),
+      })).max(100),
+    }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_status_components" });
+    const infrastructure = await options.infrastructureReader();
+    const servers = infrastructure.droplets.map((droplet) => ({ name: droplet.name, region: droplet.region }));
+    try {
+      await options.settings.saveStatusComponents(body.data.components, servers);
+      return options.settings.statusComponentAdminView(servers);
+    } catch (error) {
+      request.log.warn({ err: error }, "Status component configuration could not be saved");
+      return reply.status(400).send({ error: "invalid_status_components" });
+    }
   });
 
   app.get("/api/v1/settings/digitalocean", async (request, reply) => {
@@ -337,6 +379,47 @@ export async function buildApp(options: {
     if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
     await options.settings.clearDigitalOceanToken();
     return options.settings.digitalOceanStatus();
+  });
+
+  app.get("/api/v1/settings/github", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "settings:write")) {
+      return reply.status(403).send({ error: "platform_admin_required" });
+    }
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    let repositories: Awaited<ReturnType<GitHubRepositoryReader>> = [];
+    try {
+      repositories = await options.githubRepositoryReader?.() ?? [];
+    } catch (error) {
+      request.log.warn({ err: error }, "GitHub repository inventory could not be loaded");
+    }
+    return options.settings.githubVisibilityView(repositories);
+  });
+
+  app.put("/api/v1/settings/github", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const authorization = await requireStaff(request.headers.authorization, request.headers.cookie);
+    if ("error" in authorization) return reply.status(authorization.statusCode).send({ error: authorization.error });
+    if (!hasCapability(authorization.identity, "settings:write")) {
+      return reply.status(403).send({ error: "platform_admin_required" });
+    }
+    if (!validBrowserOrigin(request.headers.origin)) return reply.status(403).send({ error: "invalid_origin" });
+    if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
+    const body = z.object({
+      visibleOwner: z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/).or(z.literal("")),
+    }).safeParse(request.body);
+    if (!body.success) return reply.status(400).send({ error: "invalid_github_owner" });
+    let repositories: Awaited<ReturnType<GitHubRepositoryReader>> = [];
+    try {
+      repositories = await options.githubRepositoryReader?.() ?? [];
+      await options.settings.saveGithubVisibility(body.data.visibleOwner, repositories);
+      return options.settings.githubVisibilityView(repositories);
+    } catch (error) {
+      request.log.warn({ err: error }, "GitHub visibility setting could not be saved");
+      return reply.status(400).send({ error: "invalid_github_owner" });
+    }
   });
 
   app.get("/api/v1/settings/discord", async (request, reply) => {
@@ -518,13 +601,17 @@ export async function buildApp(options: {
     if (!validBrowserOrigin(request.headers.origin)) return reply.status(403).send({ error: "invalid_origin" });
     if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
     const body = z.object({
-      targetKey: z.enum(["api", "sso", "hub", "panel", "status"]),
+      targetKeys: z.array(z.enum(["api", "sso", "hub", "panel", "status"])).min(1).max(5),
+      impact: z.enum(["none", "minor", "major", "critical"]),
       title: z.string().trim().min(3).max(120),
       message: z.string().trim().min(3).max(1_000),
       scheduledFor: z.string().datetime(),
       scheduledUntil: z.string().datetime(),
     }).safeParse(request.body);
     if (!body.success) return reply.status(400).send({ error: "invalid_maintenance" });
+    if (new Set(body.data.targetKeys).size !== body.data.targetKeys.length) {
+      return reply.status(400).send({ error: "invalid_maintenance" });
+    }
     try {
       await options.settings.createMaintenance(body.data);
       return reply.status(201).send(await options.settings.maintenanceView());
@@ -565,6 +652,11 @@ export async function buildApp(options: {
   app.get("/api/v1/public/status-events", async (_request, reply) => {
     reply.header("Cache-Control", "public, max-age=15, stale-if-error=300");
     return options.settings ? options.settings.publicStatusEvents() : [];
+  });
+
+  app.get("/api/v1/public/status-components", async (_request, reply) => {
+    reply.header("Cache-Control", "public, max-age=15, stale-if-error=300");
+    return options.settings ? options.settings.publicStatusComponents() : [];
   });
 
   app.get("/api/v1/internal/discord/config", async (request, reply) => {

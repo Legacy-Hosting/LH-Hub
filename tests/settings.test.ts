@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -26,6 +26,85 @@ test("Hub settings validate and encrypt DigitalOcean tokens at rest", async () =
     assert.deepEqual(await service.digitalOceanStatus(), { configured: true, source: "stored" });
     await service.clearDigitalOceanToken();
     assert.deepEqual(await service.digitalOceanStatus(), { configured: false, source: "none" });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("legacy single-service maintenance entries migrate to affected service arrays", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lh-hub-maintenance-migration-"));
+  const file = join(directory, "settings.enc.json");
+  try {
+    await writeFile(file, JSON.stringify({
+      version: 1,
+      discord: {
+        maintenance: [{
+          id: `maintenance-${"a".repeat(24)}`,
+          targetKey: "api",
+          title: "Legacy maintenance",
+          message: "Created before multi-service maintenance was available.",
+          scheduledFor: "2099-01-01T10:00:00.000Z",
+          scheduledUntil: "2099-01-01T11:00:00.000Z",
+          createdAt: "2026-09-27T10:00:00.000Z",
+          updatedAt: "2026-09-27T10:00:00.000Z",
+        }],
+      },
+    }));
+    const service = createHubSettingsService({
+      file,
+      encryptionKey: "c".repeat(64),
+      timeoutMs: 5_000,
+    });
+    const view = await service.maintenanceView() as {
+      maintenance: Array<{ targetKeys: string[]; impact: string }>;
+    };
+    assert.deepEqual(view.maintenance[0]?.targetKeys, ["api"]);
+    assert.equal(view.maintenance[0]?.impact, "none");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("Status services preserve main ordering and expose direct origin FQDNs", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lh-hub-status-settings-"));
+  const file = join(directory, "settings.enc.json");
+  try {
+    const service = createHubSettingsService({
+      file,
+      encryptionKey: "d".repeat(64),
+      timeoutMs: 5_000,
+    });
+    const servers = [
+      { name: "ams3-api-01", region: "ams3" },
+      { name: "ams3-panel-01", region: "ams3" },
+      { name: "ams3-web-02", region: "ams3" },
+    ];
+    const defaults = await service.statusComponentAdminView(servers) as { components: Array<{ server: string; visible: boolean }> };
+    assert.equal(defaults.components.find((component) => component.server === "ams3-api-01")?.visible, true);
+
+    await service.saveStatusComponents([
+      {
+        server: "ams3-panel-01", visible: true, primary: true, displayName: "Web Panel",
+        datacenter: "Amsterdam 3", service: "Web Panel", number: "01",
+        publicUrl: "https://panel.legacyhosting.xyz/", originFqdn: "panel-origin.example.net",
+      },
+      {
+        server: "ams3-api-01", visible: true, primary: true, displayName: "API",
+        datacenter: "Amsterdam 3", service: "API", number: "01",
+        publicUrl: "https://api.legacyhosting.xyz/health", originFqdn: "api-origin.example.net",
+      },
+      {
+        server: "ams3-web-02", visible: true, primary: false, displayName: "Web 02",
+        datacenter: "Amsterdam 3", service: "Web", number: "02",
+        publicUrl: "https://web02.legacyhosting.xyz/health", originFqdn: "web-origin.example.net",
+      },
+    ], servers);
+    const publicView = await service.publicStatusComponents() as Array<{
+      key: string; name: string; connectHostname: string; primary: boolean; order: number;
+    }>;
+    assert.deepEqual(publicView.map((component) => component.name), ["Web Panel", "API", "Web 02"]);
+    assert.deepEqual(publicView.slice(0, 2).map((component) => component.order), [0, 1]);
+    assert.equal(publicView[0]?.connectHostname, "panel-origin.example.net");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -96,7 +175,8 @@ test("Hub settings encrypt Discord credentials and manage routing and maintenanc
     assert.equal(sentTestPayload?.embeds[5]?.title, "Unsaved birthday preview");
     assert.equal(sentTestPayload?.embeds[5]?.description, "Current birthday form value");
     await service.createMaintenance({
-      targetKey: "api",
+      targetKeys: ["api", "sso"],
+      impact: "major",
       title: "API maintenance",
       message: "Deploying a database update.",
       scheduledFor: "2026-12-01T10:00:00.000Z",
@@ -115,18 +195,63 @@ test("Hub settings encrypt Discord credentials and manage routing and maintenanc
     assert.equal(await service.finishMaintenance(bot.maintenance[0]!.id, "complete"), true);
     const publicEvents = await service.publicStatusEvents() as Array<{ status: string; components: string[] }>;
     assert.equal(publicEvents[0]?.status, "completed");
-    assert.deepEqual(publicEvents[0]?.components, ["api"]);
+    assert.deepEqual(publicEvents[0]?.components, ["api", "sso"]);
+    assert.equal((publicEvents[0] as { impact?: string } | undefined)?.impact, "major");
 
+    await service.saveGithubConfiguration([
+      {
+        fullName: "Legacy-Hosting/LH-Hub",
+        enabled: true,
+        channelIds: [channelId],
+      },
+      {
+        fullName: "Angel/Private-Tool",
+        enabled: true,
+        channelIds: [channelId],
+      },
+    ]);
+    const githubInventory = [
+      {
+        fullName: "Legacy-Hosting/LH-Hub",
+        url: "https://github.com/Legacy-Hosting/LH-Hub",
+        defaultBranch: "main",
+        private: true,
+      },
+      {
+        fullName: "Angel/Private-Tool",
+        url: "https://github.com/Angel/Private-Tool",
+        defaultBranch: "main",
+        private: true,
+      },
+    ];
+    assert.deepEqual(await service.githubVisibilityView(githubInventory), {
+      visibleOwner: "",
+      owners: ["Angel", "Legacy-Hosting"],
+    });
+    await assert.rejects(
+      service.saveGithubVisibility("Unknown-Organization", githubInventory),
+      /unknown_github_owner/,
+    );
+    await service.saveGithubVisibility("legacy-hosting", githubInventory);
+    assert.deepEqual(await service.githubVisibilityView(githubInventory), {
+      visibleOwner: "Legacy-Hosting",
+      owners: ["Angel", "Legacy-Hosting"],
+    });
+    const filteredGithub = await service.githubAdminView(githubInventory) as {
+      repositories: Array<{ fullName: string }>;
+    };
+    assert.deepEqual(filteredGithub.repositories.map((repository) => repository.fullName), ["Legacy-Hosting/LH-Hub"]);
     await service.saveGithubConfiguration([{
       fullName: "Legacy-Hosting/LH-Hub",
       enabled: true,
       channelIds: [channelId],
     }]);
-    const githubEvent = (deliveryId: string, receivedAt: string) => ({
+
+    const githubEvent = (deliveryId: string, receivedAt: string, fullName = "Legacy-Hosting/LH-Hub") => ({
       deliveryId,
       repository: {
-        fullName: "Legacy-Hosting/LH-Hub",
-        url: "https://github.com/Legacy-Hosting/LH-Hub",
+        fullName,
+        url: `https://github.com/${fullName}`,
         defaultBranch: "main",
         private: true,
       },
@@ -146,9 +271,10 @@ test("Hub settings encrypt Discord credentials and manage routing and maintenanc
     });
     assert.equal(await service.ingestGithubPush(githubEvent("delivery-1", "2026-09-27T19:00:00.000Z")), true);
     assert.equal(await service.ingestGithubPush(githubEvent("delivery-2", "2026-09-27T19:01:00.000Z")), true);
-    assert.deepEqual((await service.githubPushEvents()).map((event) => event.deliveryId), ["delivery-1", "delivery-2"]);
+    assert.equal(await service.ingestGithubPush(githubEvent("delivery-3", "2026-09-27T19:02:00.000Z", "Angel/Private-Tool")), true);
+    assert.deepEqual((await service.githubPushEvents()).map((event) => event.deliveryId), ["delivery-1", "delivery-2", "delivery-3"]);
     await service.acknowledgeGithubPushEvents(["delivery-1"]);
-    assert.deepEqual((await service.githubPushEvents()).map((event) => event.deliveryId), ["delivery-2"]);
+    assert.deepEqual((await service.githubPushEvents()).map((event) => event.deliveryId), ["delivery-2", "delivery-3"]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
