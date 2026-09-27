@@ -472,7 +472,14 @@ function App() {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ channelId: discordConfiguration.testChannelId }),
+        body: JSON.stringify({
+          channelId: discordConfiguration.testChannelId,
+          announcements: discordConfiguration.announcements.map(({ key, title, message }) => ({
+            key,
+            title,
+            message,
+          })),
+        }),
       });
       if (!response.ok) throw new Error("The Discord test could not be sent. Check the bot's channel permissions.");
       const result = await response.json();

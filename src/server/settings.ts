@@ -175,6 +175,11 @@ const storedSettingsSchema = z.object({
 });
 type StoredSettings = z.infer<typeof storedSettingsSchema>;
 type AnnouncementKey = z.infer<typeof announcementKeySchema>;
+type DiscordTestAnnouncement = {
+  key: AnnouncementKey;
+  title: string;
+  message: string;
+};
 
 export type HubSettingsService = {
   digitalOceanToken(): Promise<string | undefined>;
@@ -190,7 +195,7 @@ export type HubSettingsService = {
     testChannelId?: string | undefined;
     announcements: Array<{ key: AnnouncementKey; enabled: boolean; title: string; message: string; channelIds: string[] }>;
   }): Promise<void>;
-  sendDiscordTest(channelId: string): Promise<number>;
+  sendDiscordTest(channelId: string, announcements?: DiscordTestAnnouncement[]): Promise<number>;
   createMaintenance(input: {
     targetKey: "api" | "sso" | "hub" | "panel" | "status";
     title: string;
@@ -436,7 +441,7 @@ export function createHubSettingsService(options: {
         };
       });
     },
-    async sendDiscordTest(channelId) {
+    async sendDiscordTest(channelId, announcementPreviews) {
       const settings = await readSettings();
       const discord = normalizedDiscord(settings);
       if (!discord.botToken || !discord.guildId) throw new Error("discord_not_configured");
@@ -446,13 +451,20 @@ export function createHubSettingsService(options: {
       const token = decrypt(discord.botToken, key);
       const timestamp = new Date().toISOString();
       const footer = { text: "Legacy Hosting · Test notification", icon_url: discordAssetUrls.logo };
+      const previewByKey = new Map(
+        announcementPreviews?.map((announcement) => [announcement.key, announcement]) ?? [],
+      );
+      const announcements = normalizedAnnouncements(discord).map((announcement) => ({
+        ...announcement,
+        ...previewByKey.get(announcement.key),
+      }));
       const embeds = [
         { title: "API is operational", description: "**Server:** ams3-api-01\n**Status:** operational\n**Response time:** 42 ms", color: 0x35d89a, thumbnail: { url: discordAssetUrls.operational } },
         { title: "API is degraded", description: "**Server:** ams3-api-01\n**Status:** degraded\n**Response time:** 850 ms", color: 0xf3ae48, thumbnail: { url: discordAssetUrls.degraded } },
         { title: "API is unavailable", description: "**Server:** ams3-api-01\n**Status:** outage\n**Response time:** No response", color: 0xef6170, thumbnail: { url: discordAssetUrls.outage } },
         { title: "Scheduled maintenance", description: "This is a test of a maintenance notification.\n\n**Service:** API (ams3-api-01)", color: 0x7561ff, thumbnail: { url: discordAssetUrls.maintenance } },
         { title: "Scheduled maintenance completed", description: "This is a test of a completed maintenance notification.\n\n**Status:** Maintenance complete", color: 0x35d89a, thumbnail: { url: discordAssetUrls.maintenanceComplete } },
-        ...Object.values(announcementDefaults).map((announcement) => ({
+        ...announcements.map((announcement) => ({
           title: announcement.title,
           description: announcement.message.replaceAll("{years}", String(new Date().getUTCFullYear() - 2017)),
           color: 0x7561ff,

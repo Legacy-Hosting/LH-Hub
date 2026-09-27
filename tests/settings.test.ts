@@ -38,6 +38,7 @@ test("Hub settings encrypt Discord credentials and manage routing and maintenanc
   const guildId = "123456789012345678";
   const channelId = "223456789012345678";
   let sentTestEmbeds = 0;
+  let sentTestPayload: { embeds: Array<{ title: string; description: string }> } | undefined;
   try {
     const service = createHubSettingsService({
       file,
@@ -46,7 +47,10 @@ test("Hub settings encrypt Discord credentials and manage routing and maintenanc
       fetchImplementation: async (_url, options) => {
         assert.equal(new Headers(options?.headers).get("authorization"), `Bot ${botToken}`);
         if (options?.method === "POST") {
-          const payload = JSON.parse(String(options.body)) as { embeds: unknown[] };
+          const payload = JSON.parse(String(options.body)) as {
+            embeds: Array<{ title: string; description: string }>;
+          };
+          sentTestPayload = payload;
           sentTestEmbeds = payload.embeds.length;
         }
         return Response.json({ id: guildId }, { status: 200 });
@@ -75,11 +79,22 @@ test("Hub settings encrypt Discord credentials and manage routing and maintenanc
       announcements: admin.announcements.map((item) => ({
         ...item,
         enabled: true,
+        title: `Saved ${item.key} title`,
+        message: `Saved ${item.key} message {years}`,
         channelIds: [channelId],
       })),
     });
     assert.equal(await service.sendDiscordTest(channelId), 8);
     assert.equal(sentTestEmbeds, 8);
+    assert.equal(sentTestPayload?.embeds[5]?.title, "Saved birthday title");
+    assert.match(sentTestPayload?.embeds[5]?.description ?? "", /^Saved birthday message \d+$/);
+    assert.equal(await service.sendDiscordTest(channelId, admin.announcements.map((item) => ({
+      key: item.key,
+      title: `Unsaved ${item.key} preview`,
+      message: `Current ${item.key} form value`,
+    }))), 8);
+    assert.equal(sentTestPayload?.embeds[5]?.title, "Unsaved birthday preview");
+    assert.equal(sentTestPayload?.embeds[5]?.description, "Current birthday form value");
     await service.createMaintenance({
       targetKey: "api",
       title: "API maintenance",

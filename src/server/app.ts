@@ -427,10 +427,20 @@ export async function buildApp(options: {
     }
     if (!validBrowserOrigin(request.headers.origin)) return reply.status(403).send({ error: "invalid_origin" });
     if (!options.settings) return reply.status(503).send({ error: "settings_not_configured" });
-    const body = z.object({ channelId: z.string().regex(/^\d{17,20}$/) }).safeParse(request.body);
+    const body = z.object({
+      channelId: z.string().regex(/^\d{17,20}$/),
+      announcements: z.array(z.object({
+        key: z.enum(["birthday", "christmas", "newyear"]),
+        title: z.string().trim().min(1).max(256),
+        message: z.string().trim().min(1).max(2_000),
+      })).length(3).optional(),
+    }).safeParse(request.body);
     if (!body.success) return reply.status(400).send({ error: "invalid_test_channel" });
     try {
-      const sent = await options.settings.sendDiscordTest(body.data.channelId);
+      const sent = await options.settings.sendDiscordTest(
+        body.data.channelId,
+        body.data.announcements,
+      );
       return { sent };
     } catch {
       request.log.warn("Discord test notification could not be sent");

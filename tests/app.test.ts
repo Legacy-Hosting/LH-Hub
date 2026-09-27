@@ -158,7 +158,7 @@ test("health is public and contains no protected configuration", async () => {
   assert.deepEqual(response.json(), {
     status: "ok",
     service: "LH-Hub",
-    version: "0.7.2",
+    version: "0.7.3",
   });
 });
 
