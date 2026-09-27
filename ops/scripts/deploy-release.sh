@@ -50,6 +50,24 @@ ln -s "$environment_file" "$staging/.env"
 pnpm --dir "$staging" install --prod --frozen-lockfile
 chown -R root:root "$staging"
 chmod 0755 "$staging"
+
+# Keep content-addressed assets from earlier releases available to cached tabs.
+# The signed release tree stays unchanged; Nginx serves the shared asset store.
+asset_root=/var/www/legacy-hosting-hub-shared/assets
+install -d -m 0755 "$asset_root"
+for asset in "$base"/releases/*/dist/client/assets/* "$staging"/dist/client/assets/*; do
+  [[ -f $asset ]] || continue
+  destination="$asset_root/${asset##*/}"
+  if [[ -e $destination ]]; then
+    if ! cmp -s "$asset" "$destination"; then
+      echo "A different asset already uses the same name: ${asset##*/}" >&2
+      exit 1
+    fi
+  else
+    install -m 0644 "$asset" "$destination"
+  fi
+done
+
 mv "$staging" "$release"
 trap - EXIT
 
