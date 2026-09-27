@@ -28,10 +28,10 @@ pnpm dev:ui
 
 ## Release and deployment
 
-Tags named `v*` publish immutable archives to `LH-Releases/LH-Hub` and checksums to its `SHA256` directory. Deploy on `ams3-hub-01` with:
+Tags named `v*` publish immutable archives to `LH-Releases/LH-Hub`, checksums to `SHA256`, and detached Ed25519 signatures to `SIGNATURES`. A release fails closed when `RELEASE_SIGNING_PRIVATE_KEY_B64` is unavailable. Deploy on `ams3-hub-01` with:
 
 ```bash
-ops/scripts/deploy-release.sh ARCHIVE CHECKSUM VERSION
+ops/scripts/deploy-release.sh ARCHIVE CHECKSUM SIGNATURE VERSION
 ```
 
 Production requires `/etc/legacy-hosting/hub.env` with mode `0600`, `API_ORIGIN=https://api.legacyhosting.xyz`, `STATUS_API_URL=https://status.legacyhosting.xyz/api/v1/status`, a valid certificate for `hub.legacyhosting.xyz`, and a live LH-SSO issuer. The release is installed below `/opt/legacy-hosting/hub/releases`.
