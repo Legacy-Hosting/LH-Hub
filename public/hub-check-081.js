@@ -51,7 +51,7 @@
     const centerElement = document.elementFromPoint(Math.min(500, window.innerWidth - 1), Math.min(200, window.innerHeight - 1));
     const shellStyle = shell && getComputedStyle(shell);
     const asideStyle = aside && getComputedStyle(aside);
-    const signature = [state, blank, visibleTextLength, shellHeight, headerHeight, asideWidth, topElement?.tagName, centerElement?.tagName, runtimeError].join("/");
+    const signature = [state, blank, visibleTextLength, shellHeight, headerHeight, asideWidth, shell?.scrollTop, topElement?.tagName, centerElement?.tagName, runtimeError].join("/");
     const now = Date.now();
     if (trigger === "periodic" && signature === lastSignature && now - lastReportAt < 30_000) return;
     lastSignature = signature;
@@ -62,7 +62,7 @@
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        version: "0.7.10",
+        version: "0.7.11",
         path: window.location.pathname,
         trigger,
         state,
@@ -87,6 +87,9 @@
         asideOpacity: String(asideStyle?.opacity || "none").slice(0, 30),
         asideLeft: Math.round(aside?.getBoundingClientRect().left || 0),
         headerTop: Math.round(header?.getBoundingClientRect().top || 0),
+        shellScrollTop: shell?.scrollTop || 0,
+        rootScrollTop: root?.scrollTop || 0,
+        contentScrollTop: shell?.querySelector(".content")?.scrollTop || 0,
         runtimeError,
       }),
       keepalive: true,
