@@ -99,15 +99,16 @@ test("Status services preserve main ordering and expose direct origin FQDNs", as
       {
         server: "ams3-web-02", visible: true, primary: false, displayName: "Web 02",
         datacenter: "Amsterdam 3", service: "Web", number: "02",
-        publicUrl: "https://web02.legacyhosting.xyz/health", originFqdn: "web-origin.example.net",
+        publicUrl: "http://web02.legacyhosting.xyz/health", originFqdn: "web-origin.example.net",
       },
     ], servers);
     const publicView = await service.publicStatusComponents() as Array<{
-      key: string; name: string; connectHostname: string; primary: boolean; order: number;
+      key: string; name: string; url: string; connectHostname: string; primary: boolean; order: number;
     }>;
     assert.deepEqual(publicView.map((component) => component.name), ["Web Panel", "API", "Web 02"]);
     assert.deepEqual(publicView.slice(0, 2).map((component) => component.order), [0, 1]);
     assert.equal(publicView[0]?.connectHostname, "panel-origin.example.net");
+    assert.equal(publicView[2]?.url, "http://web02.legacyhosting.xyz/health");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

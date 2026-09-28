@@ -426,7 +426,7 @@ function directHostname(server: string) {
 
 function validatedPublicUrl(value: string) {
   const url = new URL(value);
-  if (url.protocol !== "https:" || url.username || url.password || url.hash) {
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash) {
     throw new Error("invalid_status_public_url");
   }
   return url.toString();

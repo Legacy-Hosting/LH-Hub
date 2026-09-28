@@ -328,7 +328,11 @@ export async function buildApp(options: {
       return options.settings.statusComponentAdminView(servers);
     } catch (error) {
       request.log.warn({ err: error }, "Status component configuration could not be saved");
-      return reply.status(400).send({ error: "invalid_status_components" });
+      const reason = error instanceof Error ? error.message : "";
+      return reply.status(400).send({ error: [
+        "invalid_status_public_url", "status_public_url_required", "unknown_status_server",
+        "duplicate_status_server", "status_component_required", "duplicate_status_component_key",
+      ].includes(reason) ? reason : "invalid_status_components" });
     }
   });
 

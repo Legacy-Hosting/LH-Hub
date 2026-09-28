@@ -549,6 +549,19 @@ function App() {
   async function saveStatusComponents() {
     const configuration = infrastructure.statusComponents;
     if (!configuration || !Array.isArray(configuration.components)) return;
+    const invalidUrl = configuration.components.find((component) => {
+      if (!component.publicUrl) return Boolean(component.visible);
+      try {
+        const parsed = new URL(component.publicUrl);
+        return !["http:", "https:"].includes(parsed.protocol) || Boolean(parsed.username || parsed.password || parsed.hash);
+      } catch {
+        return true;
+      }
+    });
+    if (invalidUrl) {
+      setStatusLayoutMessage(`${invalidUrl.server}: enter a valid HTTP or HTTPS health URL without credentials or a fragment.`);
+      return;
+    }
     setStatusLayoutBusy(true);
     setStatusLayoutMessage("");
     try {
@@ -570,7 +583,16 @@ function App() {
           })),
         }),
       });
-      if (!response.ok) throw new Error("The Status layout could not be saved. Check all visible service addresses and origin FQDNs.");
+      if (!response.ok) {
+        const details = await response.json().catch(() => ({}));
+        const errors = {
+          invalid_status_public_url: "A health URL must use HTTP or HTTPS without credentials or a fragment.",
+          status_public_url_required: "Every visible service needs a health URL.",
+          unknown_status_server: "The server list changed. Reload Infrastructure and try again.",
+          status_component_required: "At least one visible service needs a health URL.",
+        };
+        throw new Error(errors[details.error] ?? "The Status layout could not be saved. Check service names, addresses and origin FQDNs.");
+      }
       const statusComponents = await response.json();
       statusLayoutDraftRef.current = null;
       statusLayoutDirtyRef.current = false;
@@ -930,6 +952,7 @@ function App() {
               <StatusComponentManager
                 configuration={infrastructure.statusComponents}
                 canConfigure={auth.capabilities.includes("settings:write")}
+                dirty={statusLayoutDirtyRef.current}
                 busy={statusLayoutBusy}
                 message={statusLayoutMessage}
                 onChange={editStatusComponents}

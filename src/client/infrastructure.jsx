@@ -21,7 +21,7 @@ function normalizedComponent(component) {
   };
 }
 
-export function StatusComponentManager({ configuration, canConfigure, busy, message, onChange, onSave }) {
+export function StatusComponentManager({ configuration, canConfigure, dirty, busy, message, onChange, onSave }) {
   const components = Array.isArray(configuration?.components)
     ? configuration.components.filter((component) => component && typeof component === "object").map(normalizedComponent)
     : [];
@@ -61,7 +61,7 @@ export function StatusComponentManager({ configuration, canConfigure, busy, mess
       </div>
       <div className="status-layout-note">
         <MonitorUp size={20} />
-        <div><strong>Direct origin monitoring</strong><p>The origin FQDN is resolved for every check. Status connects to that IP directly while retaining the public hostname for TLS and HTTP.</p></div>
+        <div><strong>Direct origin monitoring</strong><p>The origin FQDN is resolved for every check. Status connects to that IP directly while retaining the public hostname for TLS and HTTP. HTTPS is encrypted; HTTP is not.</p></div>
       </div>
       {components.length === 0 ? (
         <div className="operations-panel empty-state"><MonitorUp size={25} /><p>No DigitalOcean servers are available for Status configuration.</p></div>
@@ -113,13 +113,15 @@ export function StatusComponentManager({ configuration, canConfigure, busy, mess
       )}
       <datalist id="status-datacenters">{(configuration?.datacenters ?? []).map((value) => <option value={value} key={value} />)}</datalist>
       <datalist id="status-services">{(configuration?.services ?? []).map((value) => <option value={value} key={value} />)}</datalist>
-      {message && <p className="settings-message" role="status">{message}</p>}
-      {canConfigure && components.length > 0 && (
-        <div className="provider-actions">
+      {!dirty && message && <p className="settings-message" role="status">{message}</p>}
+      {canConfigure && components.length > 0 && dirty && (
+        <section className="configuration-save-prompt" aria-live="polite">
+          <div><strong>Unsaved Status changes</strong><p>The public Status page will keep showing the last saved layout until you save these changes.</p></div>
+          {message && <p className="settings-message github-message" role="alert">{message}</p>}
           <button className="primary" type="button" disabled={busy} onClick={onSave}>
             {busy ? <RefreshCw className="spin" size={15} /> : <Save size={15} />}Save Status layout
           </button>
-        </div>
+        </section>
       )}
     </section>
   );
